@@ -19,8 +19,13 @@ def main():
 
     if df is not None and not df.empty:
         save_to_csv(df, symbol, expiry)
-        check_directional_signal(df, spot, symbol)
-        print(f"✅ Data saved and signals checked for {symbol}")
+        # Only check signals if spot is numeric
+        try:
+            float(spot)
+            check_directional_signal(df, spot, symbol)
+        except (ValueError, TypeError):
+            print(f"⚠️ Spot price not numeric ({spot}). Skipping signal check.")
+        print(f"✅ Data saved for {symbol}")
     else:
         print(f"❌ Failed to fetch data for {symbol}")
 
