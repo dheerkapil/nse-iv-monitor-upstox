@@ -30,6 +30,10 @@ def save_current_state(state):
         json.dump(state, f, indent=2)
 
 def get_atm_strike(df, spot_price):
+    try:
+        spot_price = float(spot_price)
+    except (ValueError, TypeError):
+        return None
     df['strike_diff'] = abs(df['strike'] - spot_price)
     return df.loc[df['strike_diff'].idxmin(), 'strike']
 
@@ -40,7 +44,6 @@ def get_otm_strikes(df, atm_strike, step=100, count=2):
     below = []
     for i in range(1, count+1):
         target_up = atm_strike + i*step
-        # find nearest available strike above atm
         up_candidate = min(available_strikes, key=lambda x: abs(x - target_up))
         above.append(up_candidate)
         target_down = atm_strike - i*step
@@ -52,7 +55,18 @@ def check_directional_signal(df, spot_price, symbol):
     if symbol != "NIFTY":
         return
 
+    # Validate spot price
+    try:
+        spot_price = float(spot_price)
+    except (ValueError, TypeError):
+        print(f"⚠️ Invalid spot price: {spot_price}. Skipping alert.")
+        return
+
     atm_strike = get_atm_strike(df, spot_price)
+    if atm_strike is None:
+        print("⚠️ Could not determine ATM strike.")
+        return
+
     atm_ce_iv = df.loc[df['strike'] == atm_strike, 'ce_iv'].values[0]
     atm_pe_iv = df.loc[df['strike'] == atm_strike, 'pe_iv'].values[0]
 
@@ -81,8 +95,8 @@ def check_directional_signal(df, spot_price, symbol):
         'atm_strike': atm_strike,
         'atm_ce_iv': round(atm_ce_iv, 2),
         'atm_pe_iv': round(atm_pe_iv, 2),
-        'otm_call_avg': round(otm_call_avg, 2),      # above strikes (calls)
-        'otm_put_avg': round(otm_put_avg, 2),        # above strikes (puts)
+        'otm_call_avg': round(otm_call_avg, 2),
+        'otm_put_avg': round(otm_put_avg, 2),
         'otm_below_call_avg': round(otm_below_call_avg, 2),
         'otm_below_put_avg': round(otm_below_put_avg, 2),
     }
@@ -98,7 +112,6 @@ def check_directional_signal(df, spot_price, symbol):
     delta_atm_pe = current_state['atm_pe_iv'] - prev.get('atm_pe_iv', 0)
     delta_otm_call = current_state['otm_call_avg'] - prev.get('otm_call_avg', 0)
     delta_otm_put = current_state['otm_put_avg'] - prev.get('otm_put_avg', 0)
-    # For below strikes (puts are more relevant for bearish)
     delta_otm_below_call = current_state['otm_below_call_avg'] - prev.get('otm_below_call_avg', 0)
     delta_otm_below_put = current_state['otm_below_put_avg'] - prev.get('otm_below_put_avg', 0)
 
@@ -106,7 +119,7 @@ def check_directional_signal(df, spot_price, symbol):
     bearish = False
     alert_msg = ""
 
-    # Bullish condition (using above OTM calls and below OTM puts? Actually spec: OTM calls (above) and OTM puts (below))
+    # Bullish condition
     if (delta_atm_ce > 1.0 and delta_atm_pe < -0.5 and
         delta_otm_call > 1.0 and delta_otm_below_put < -0.5):
         bullish = True
