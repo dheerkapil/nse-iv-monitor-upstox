@@ -2,6 +2,10 @@ import os
 import json
 import requests
 from datetime import datetime
+from config import (
+    BULLISH_CALL_RISE, BULLISH_PUT_FALL, BULLISH_OTM_CALL_RISE, BULLISH_OTM_PUT_FALL,
+    BEARISH_PUT_RISE, BEARISH_CALL_FALL, BEARISH_OTM_PUT_RISE, BEARISH_OTM_CALL_FALL
+)
 
 CACHE_FILE = 'iv_state.json'
 
@@ -111,17 +115,15 @@ def check_directional_signal(df, spot_price, symbol):
     delta_atm_ce = current_state['atm_ce_iv'] - prev.get('atm_ce_iv', 0)
     delta_atm_pe = current_state['atm_pe_iv'] - prev.get('atm_pe_iv', 0)
     delta_otm_call = current_state['otm_call_avg'] - prev.get('otm_call_avg', 0)
-    delta_otm_put = current_state['otm_put_avg'] - prev.get('otm_put_avg', 0)
-    delta_otm_below_call = current_state['otm_below_call_avg'] - prev.get('otm_below_call_avg', 0)
     delta_otm_below_put = current_state['otm_below_put_avg'] - prev.get('otm_below_put_avg', 0)
 
     bullish = False
     bearish = False
     alert_msg = ""
 
-    # Bullish condition
-    if (delta_atm_ce > 1.0 and delta_atm_pe < -0.5 and
-        delta_otm_call > 1.0 and delta_otm_below_put < -0.5):
+    # Bullish condition (using thresholds from config)
+    if (delta_atm_ce > BULLISH_CALL_RISE and delta_atm_pe < BULLISH_PUT_FALL and
+        delta_otm_call > BULLISH_OTM_CALL_RISE and delta_otm_below_put < BULLISH_OTM_PUT_FALL):
         bullish = True
         alert_msg = (
             f"🟢 *BULLISH Signal* (NIFTY Spot: {spot_price:.2f})\n"
@@ -132,8 +134,8 @@ def check_directional_signal(df, spot_price, symbol):
         )
 
     # Bearish condition
-    if (delta_atm_pe > 1.0 and delta_atm_ce < -0.5 and
-        delta_otm_below_put > 1.0 and delta_otm_call < -0.5):
+    if (delta_atm_pe > BEARISH_PUT_RISE and delta_atm_ce < BEARISH_CALL_FALL and
+        delta_otm_below_put > BEARISH_OTM_PUT_RISE and delta_otm_call < BEARISH_OTM_CALL_FALL):
         bearish = True
         alert_msg = (
             f"🔴 *BEARISH Signal* (NIFTY Spot: {spot_price:.2f})\n"
