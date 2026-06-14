@@ -1,99 +1,138 @@
-import requests
-import json
 import os
+import json
+import requests
 from datetime import datetime
 
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
-STATE_FILE = 'iv_state.json'
+CACHE_FILE = 'iv_state.json'
 
 def send_telegram(message):
-    """Send message via Telegram bot."""
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+    bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
+    chat_id = os.getenv('TELEGRAM_CHAT_ID')
+    if not bot_token or not chat_id:
         print("⚠️ Telegram credentials missing, skipping alert.")
         return
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     try:
-        r = requests.post(url, json=payload, timeout=5)
+        r = requests.post(url, json={'chat_id': chat_id, 'text': message, 'parse_mode': 'Markdown'}, timeout=5)
         if r.status_code != 200:
             print(f"❌ Telegram error: {r.text}")
     except Exception as e:
         print(f"❌ Telegram send failed: {e}")
 
-def load_previous_iv():
-    """Load stored IVs from JSON file."""
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, 'r') as f:
+def load_previous_state():
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, 'r') as f:
             return json.load(f)
     return {}
 
-def save_current_iv(iv_data):
-    """Save current IVs to JSON file."""
-    with open(STATE_FILE, 'w') as f:
-        json.dump(iv_data, f, indent=2)
+def save_current_state(state):
+    with open(CACHE_FILE, 'w') as f:
+        json.dump(state, f, indent=2)
 
-def check_iv_alerts(df, spot_price, iv_threshold_atm=2.0, iv_threshold_otm=5.0):
-    """
-    Compares current IVs with previous values and sends alerts.
-    df: DataFrame with strikes, ce_iv, pe_iv, etc.
-    spot_price: current underlying price.
-    iv_threshold_atm: absolute % change to trigger alert for ATM.
-    iv_threshold_otm: absolute % change for OTM strikes.
-    """
-    # Find ATM strike
+def get_atm_strike(df, spot_price):
     df['strike_diff'] = abs(df['strike'] - spot_price)
-    atm_strike = df.loc[df['strike_diff'].idxmin(), 'strike']
+    return df.loc[df['strike_diff'].idxmin(), 'strike']
+
+def get_otm_strikes(df, atm_strike, step=100, count=2):
+    """Get 'count' strikes above and below atm_strike by step increments."""
+    available_strikes = sorted(df['strike'].unique())
+    above = []
+    below = []
+    for i in range(1, count+1):
+        target_up = atm_strike + i*step
+        # find nearest available strike above atm
+        up_candidate = min(available_strikes, key=lambda x: abs(x - target_up))
+        above.append(up_candidate)
+        target_down = atm_strike - i*step
+        down_candidate = min(available_strikes, key=lambda x: abs(x - target_down))
+        below.append(down_candidate)
+    return above, below
+
+def check_directional_signal(df, spot_price, symbol):
+    if symbol != "NIFTY":
+        return
+
+    atm_strike = get_atm_strike(df, spot_price)
     atm_ce_iv = df.loc[df['strike'] == atm_strike, 'ce_iv'].values[0]
     atm_pe_iv = df.loc[df['strike'] == atm_strike, 'pe_iv'].values[0]
 
-    # Pick OTM strikes: e.g., 200 points above and below ATM
-    otm_up_strike = atm_strike + 200
-    otm_down_strike = atm_strike - 200
-    # Find closest available strikes
-    otm_up = df.iloc[(df['strike'] - otm_up_strike).abs().argsort()[:1]]['strike'].values[0]
-    otm_down = df.iloc[(df['strike'] - otm_down_strike).abs().argsort()[:1]]['strike'].values[0]
-    otm_up_ce_iv = df.loc[df['strike'] == otm_up, 'ce_iv'].values[0]
-    otm_up_pe_iv = df.loc[df['strike'] == otm_up, 'pe_iv'].values[0]
-    otm_down_ce_iv = df.loc[df['strike'] == otm_down, 'ce_iv'].values[0]
-    otm_down_pe_iv = df.loc[df['strike'] == otm_down, 'pe_iv'].values[0]
+    # OTM strikes: two above and two below (100, 200 points)
+    above_strikes, below_strikes = get_otm_strikes(df, atm_strike, step=100, count=2)
+    otm_ce_ivs = []
+    otm_pe_ivs = []
+    for s in above_strikes:
+        otm_ce_ivs.append(df.loc[df['strike'] == s, 'ce_iv'].values[0])
+        otm_pe_ivs.append(df.loc[df['strike'] == s, 'pe_iv'].values[0])
+    otm_call_avg = sum(otm_ce_ivs)/len(otm_ce_ivs) if otm_ce_ivs else 0
+    otm_put_avg = sum(otm_pe_ivs)/len(otm_pe_ivs) if otm_pe_ivs else 0
 
-    # Build current IV snapshot
-    current = {
-        "timestamp": datetime.now().isoformat(),
-        "spot": spot_price,
-        "atm_strike": atm_strike,
-        "atm_ce_iv": round(atm_ce_iv, 2),
-        "atm_pe_iv": round(atm_pe_iv, 2),
-        "otm_up_strike": otm_up,
-        "otm_up_ce_iv": round(otm_up_ce_iv, 2),
-        "otm_up_pe_iv": round(otm_up_pe_iv, 2),
-        "otm_down_strike": otm_down,
-        "otm_down_ce_iv": round(otm_down_ce_iv, 2),
-        "otm_down_pe_iv": round(otm_down_pe_iv, 2),
+    # For puts OTM we use below strikes
+    below_ce_ivs = []
+    below_pe_ivs = []
+    for s in below_strikes:
+        below_ce_ivs.append(df.loc[df['strike'] == s, 'ce_iv'].values[0])
+        below_pe_ivs.append(df.loc[df['strike'] == s, 'pe_iv'].values[0])
+    otm_below_call_avg = sum(below_ce_ivs)/len(below_ce_ivs) if below_ce_ivs else 0
+    otm_below_put_avg = sum(below_pe_ivs)/len(below_pe_ivs) if below_pe_ivs else 0
+
+    current_state = {
+        'timestamp': datetime.now().isoformat(),
+        'spot': spot_price,
+        'atm_strike': atm_strike,
+        'atm_ce_iv': round(atm_ce_iv, 2),
+        'atm_pe_iv': round(atm_pe_iv, 2),
+        'otm_call_avg': round(otm_call_avg, 2),      # above strikes (calls)
+        'otm_put_avg': round(otm_put_avg, 2),        # above strikes (puts)
+        'otm_below_call_avg': round(otm_below_call_avg, 2),
+        'otm_below_put_avg': round(otm_below_put_avg, 2),
     }
 
-    previous = load_previous_iv()
-    alerts = []
+    prev = load_previous_state()
+    if not prev:
+        save_current_state(current_state)
+        print("✅ Initial state saved. No comparison.")
+        return
 
-    if previous:
-        # ATM alerts
-        if abs(current['atm_ce_iv'] - previous.get('atm_ce_iv', 0)) >= iv_threshold_atm:
-            alerts.append(f"ATM Call IV changed: {previous.get('atm_ce_iv')}% → {current['atm_ce_iv']}%")
-        if abs(current['atm_pe_iv'] - previous.get('atm_pe_iv', 0)) >= iv_threshold_atm:
-            alerts.append(f"ATM Put IV changed: {previous.get('atm_pe_iv')}% → {current['atm_pe_iv']}%")
+    # Compute changes
+    delta_atm_ce = current_state['atm_ce_iv'] - prev.get('atm_ce_iv', 0)
+    delta_atm_pe = current_state['atm_pe_iv'] - prev.get('atm_pe_iv', 0)
+    delta_otm_call = current_state['otm_call_avg'] - prev.get('otm_call_avg', 0)
+    delta_otm_put = current_state['otm_put_avg'] - prev.get('otm_put_avg', 0)
+    # For below strikes (puts are more relevant for bearish)
+    delta_otm_below_call = current_state['otm_below_call_avg'] - prev.get('otm_below_call_avg', 0)
+    delta_otm_below_put = current_state['otm_below_put_avg'] - prev.get('otm_below_put_avg', 0)
 
-        # OTM alerts (using the same threshold for both sides)
-        for side, key in [('OTM Up Call', 'otm_up_ce_iv'), ('OTM Up Put', 'otm_up_pe_iv'),
-                          ('OTM Down Call', 'otm_down_ce_iv'), ('OTM Down Put', 'otm_down_pe_iv')]:
-            if abs(current[key] - previous.get(key, 0)) >= iv_threshold_otm:
-                alerts.append(f"{side} IV changed: {previous.get(key)}% → {current[key]}%")
+    bullish = False
+    bearish = False
+    alert_msg = ""
 
-    if alerts:
-        message = f"*IV Alert – NIFTY (Spot: {spot_price})*\n" + "\n".join(alerts)
-        send_telegram(message)
+    # Bullish condition (using above OTM calls and below OTM puts? Actually spec: OTM calls (above) and OTM puts (below))
+    if (delta_atm_ce > 1.0 and delta_atm_pe < -0.5 and
+        delta_otm_call > 1.0 and delta_otm_below_put < -0.5):
+        bullish = True
+        alert_msg = (
+            f"🟢 *BULLISH Signal* (NIFTY Spot: {spot_price:.2f})\n"
+            f"ATM Call IV: {prev['atm_ce_iv']} → {current_state['atm_ce_iv']} (Δ{delta_atm_ce:+.2f})\n"
+            f"ATM Put IV: {prev['atm_pe_iv']} → {current_state['atm_pe_iv']} (Δ{delta_atm_pe:+.2f})\n"
+            f"OTM Calls (above) Avg: {prev['otm_call_avg']} → {current_state['otm_call_avg']} (Δ{delta_otm_call:+.2f})\n"
+            f"OTM Puts (below) Avg: {prev['otm_below_put_avg']} → {current_state['otm_below_put_avg']} (Δ{delta_otm_below_put:+.2f})"
+        )
+
+    # Bearish condition
+    if (delta_atm_pe > 1.0 and delta_atm_ce < -0.5 and
+        delta_otm_below_put > 1.0 and delta_otm_call < -0.5):
+        bearish = True
+        alert_msg = (
+            f"🔴 *BEARISH Signal* (NIFTY Spot: {spot_price:.2f})\n"
+            f"ATM Put IV: {prev['atm_pe_iv']} → {current_state['atm_pe_iv']} (Δ{delta_atm_pe:+.2f})\n"
+            f"ATM Call IV: {prev['atm_ce_iv']} → {current_state['atm_ce_iv']} (Δ{delta_atm_ce:+.2f})\n"
+            f"OTM Puts (below) Avg: {prev['otm_below_put_avg']} → {current_state['otm_below_put_avg']} (Δ{delta_otm_below_put:+.2f})\n"
+            f"OTM Calls (above) Avg: {prev['otm_call_avg']} → {current_state['otm_call_avg']} (Δ{delta_otm_call:+.2f})"
+        )
+
+    if bullish or bearish:
+        send_telegram(alert_msg)
     else:
-        print("✅ No IV alerts triggered.")
+        print("✅ No directional signal triggered.")
 
-    # Save current state for next comparison
-    save_current_iv(current)
+    save_current_state(current_state)
