@@ -32,14 +32,6 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
-      - name: Commit and push CSV files
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add data/
-          git diff --quiet && git diff --staged --quiet || git commit -m "Auto-update option chain data [skip ci]"
-          git push https://${{ secrets.PAT }}@github.com/dheerkapil/nse-iv-monitor-upstox.git HEAD:main
-
       - uses: actions/upload-artifact@v4
         with:
           name: option-chain-data-${{ github.run_id }}
