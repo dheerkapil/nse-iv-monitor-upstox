@@ -16,6 +16,32 @@ def get_next_tuesday_expiry():
     next_tue = today + timedelta(days=days_ahead)
     return next_tue.strftime("%Y-%m-%d")
 
+def fetch_spot_price(instrument_key):
+    """
+    Fetch live spot price from Upstox market quote LTP endpoint.
+    Returns float or None if failed.
+    """
+    url = f"{UPSTOX_API_BASE}/market/quote/ltp"
+    params = {"instrument_key": instrument_key}
+    try:
+        response = requests.get(url, headers=HEADERS, params=params, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            # Extract LTP from response (structure may vary)
+            ltp = data.get('data', {}).get(instrument_key, {}).get('ltp')
+            if ltp:
+                return float(ltp)
+            # Alternative structure
+            if data.get('data') and isinstance(data['data'], list):
+                for item in data['data']:
+                    if item.get('instrument_key') == instrument_key:
+                        return float(item.get('ltp', 0))
+        print(f"⚠️ Could not fetch spot price. Status: {response.status_code}")
+        return None
+    except Exception as e:
+        print(f"⚠️ Exception fetching spot price: {e}")
+        return None
+
 def fetch_option_chain(instrument_key, expiry_date=None):
     """
     Fetch option chain for a given instrument and expiry.
@@ -46,6 +72,16 @@ def fetch_option_chain(instrument_key, expiry_date=None):
 
         rows = []
         spot_price = data.get('underlying_spot', 'N/A')
+
+        # If spot price is N/A, fetch it from LTP endpoint
+        if spot_price == 'N/A' or spot_price is None:
+            print("⚠️ underlying_spot is N/A, fetching from LTP endpoint...")
+            fetched_spot = fetch_spot_price(instrument_key)
+            if fetched_spot:
+                spot_price = fetched_spot
+                print(f"✅ Fetched spot price from LTP: ₹{spot_price}")
+            else:
+                print("⚠️ Could not fetch spot price. Signals will be skipped.")
 
         for strike_data in data['data']:
             ce = strike_data.get('ce') or {}
