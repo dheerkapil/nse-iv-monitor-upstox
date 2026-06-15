@@ -14,9 +14,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - name: Restore IV state cache
         uses: actions/cache@v3
         with:
@@ -24,12 +26,23 @@ jobs:
           key: iv-state-${{ github.run_id }}
           restore-keys: |
             iv-state-
+
       - run: pip install -r requirements.txt
+
       - run: python main.py
         env:
           UPSTOX_ACCESS_TOKEN: ${{ secrets.UPSTOX_ACCESS_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      - name: Commit and push CSV files
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add data/
+          git diff --quiet && git diff --staged --quiet || git commit -m "Auto-update option chain data [skip ci]"
+          git push
+
       - uses: actions/upload-artifact@v4
         with:
           name: option-chain-data-${{ github.run_id }}
