@@ -19,7 +19,7 @@ def main():
 
     if df is not None and not df.empty:
         save_to_csv(df, symbol, expiry)
-        # Sanitize spot price: remove currency symbols, commas, extra spaces
+        # Clean the spot price (remove currency symbols, commas, extra spaces)
         try:
             spot_clean = str(spot).strip().replace('₹', '').replace(',', '')
             spot_num = float(spot_clean)
