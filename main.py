@@ -19,10 +19,11 @@ def main():
 
     if df is not None and not df.empty:
         save_to_csv(df, symbol, expiry)
-        # Only check signals if spot is numeric
+        # Sanitize spot price: remove currency symbols, commas, extra spaces
         try:
-            float(spot)
-            check_directional_signal(df, spot, symbol)
+            spot_clean = str(spot).strip().replace('₹', '').replace(',', '')
+            spot_num = float(spot_clean)
+            check_directional_signal(df, spot_num, symbol)
         except (ValueError, TypeError):
             print(f"⚠️ Spot price not numeric ({spot}). Skipping signal check.")
         print(f"✅ Data saved for {symbol}")
