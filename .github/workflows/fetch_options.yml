@@ -2,13 +2,10 @@ name: Fetch Upstox Option Chain Data
 
 on:
   schedule:
+    # Every 5 minutes from 9:15 AM IST to 3:30 PM IST, Monday to Friday
     - cron: '45-59/5 3 * * 1-5'
     - cron: '*/5 4-10 * * 1-5'
   workflow_dispatch:
-
-# Grant write permissions to the GITHUB_TOKEN for pushing commits
-permissions:
-  contents: write
 
 jobs:
   fetch-options:
@@ -42,7 +39,7 @@ jobs:
           git config --local user.name "GitHub Action"
           git add data/
           git diff --quiet && git diff --staged --quiet || git commit -m "Auto-update option chain data [skip ci]"
-          git push
+          git push https://x-access-token:${{ secrets.PAT }}@github.com/dheerkapil/nse-iv-monitor-upstox.git HEAD:main
 
       - uses: actions/upload-artifact@v4
         with:
