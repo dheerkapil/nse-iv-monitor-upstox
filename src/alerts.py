@@ -54,7 +54,7 @@ def check_directional_signal(df, spot_price, symbol):
     if symbol != "NIFTY":
         return
 
-    # spot_price is already a float (from main.py)
+    # spot_price is already a float from main.py
     atm_strike = get_atm_strike(df, spot_price)
     atm_ce_iv = df.loc[df['strike'] == atm_strike, 'ce_iv'].values[0]
     atm_pe_iv = df.loc[df['strike'] == atm_strike, 'pe_iv'].values[0]
