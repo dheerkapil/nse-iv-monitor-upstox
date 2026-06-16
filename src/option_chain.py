@@ -36,9 +36,17 @@ def fetch_option_chain(instrument_key, expiry_date=None):
             return None, None
 
         rows = []
+        
+        # Extract spot price from API response
         spot_price = data.get('underlying_spot', 'N/A')
         if spot_price == 'N/A' and data['data']:
             spot_price = data['data'][0].get('underlying_spot_price', 'N/A')
+        
+        # Ensure spot_price is a clean string for later parsing
+        if isinstance(spot_price, (int, float)):
+            spot_price = str(spot_price)
+        elif spot_price is None:
+            spot_price = 'N/A'
 
         for strike_data in data['data']:
             call = strike_data.get('call_options') or {}
