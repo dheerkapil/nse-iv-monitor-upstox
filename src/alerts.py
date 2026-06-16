@@ -24,10 +24,20 @@ def send_telegram(message):
         print(f"❌ Telegram send failed: {e}")
 
 def load_previous_state():
-    if os.path.exists(CACHE_FILE):
+    """Load IV state from cache file, handle corruption gracefully."""
+    if not os.path.exists(CACHE_FILE):
+        return {}
+    
+    try:
         with open(CACHE_FILE, 'r') as f:
             return json.load(f)
-    return {}
+    except (json.JSONDecodeError, ValueError) as e:
+        print(f"⚠️ Cache file corrupted ({e}). Removing and starting fresh.")
+        try:
+            os.remove(CACHE_FILE)
+        except:
+            pass
+        return {}
 
 def save_current_state(state):
     with open(CACHE_FILE, 'w') as f:
@@ -54,7 +64,6 @@ def check_directional_signal(df, spot_price, symbol):
     if symbol != "NIFTY":
         return
 
-    # spot_price is already a float from main.py
     atm_strike = get_atm_strike(df, spot_price)
     atm_ce_iv = df.loc[df['strike'] == atm_strike, 'ce_iv'].values[0]
     atm_pe_iv = df.loc[df['strike'] == atm_strike, 'pe_iv'].values[0]
