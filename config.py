@@ -25,7 +25,7 @@ BULLISH_OTM_CALL_RISE = 0.25  # OTM Call average IV must increase by more than t
 BULLISH_OTM_PUT_FALL = -0.25  # OTM Put average IV must decrease by more than this (below ATM)
 
 # Bearish signals
-BEARISH_PUT_RISE = 0.5       # ATM Put IV must increase by more than this
-BEARISH_CALL_FALL = -0.5     # ATM Call IV must decrease by more than this (negative)
-BEARISH_OTM_PUT_RISE = 0.5   # OTM Put average IV must increase by more than this (below ATM)
-BEARISH_OTM_CALL_FALL = -0.5 # OTM Call average IV must decrease by more than this (above ATM)
+BEARISH_PUT_RISE = 0.25       # ATM Put IV must increase by more than this
+BEARISH_CALL_FALL = -0.25     # ATM Call IV must decrease by more than this (negative)
+BEARISH_OTM_PUT_RISE = 0.25   # OTM Put average IV must increase by more than this (below ATM)
+BEARISH_OTM_CALL_FALL = -0.25 # OTM Call average IV must decrease by more than this (above ATM)
