@@ -3,8 +3,10 @@ import json
 import requests
 from datetime import datetime
 from config import (
-    BULLISH_CALL_RISE, BULLISH_PUT_FALL, BULLISH_OTM_CALL_RISE, BULLISH_OTM_PUT_FALL,
-    BEARISH_PUT_RISE, BEARISH_CALL_FALL, BEARISH_OTM_PUT_RISE, BEARISH_OTM_CALL_FALL
+    BULLISH_CALL_RISE_PCT, BULLISH_PUT_FALL_PCT,
+    BULLISH_OTM_CALL_RISE_PCT, BULLISH_OTM_PUT_FALL_PCT,
+    BEARISH_PUT_RISE_PCT, BEARISH_CALL_FALL_PCT,
+    BEARISH_OTM_PUT_RISE_PCT, BEARISH_OTM_CALL_FALL_PCT
 )
 
 CACHE_FILE = 'iv_state.json'
@@ -65,6 +67,12 @@ def get_otm_strikes(df, atm_strike, step=100, count=2):
         below.append(down_candidate)
     return above, below
 
+def calculate_percentage_change(current, previous):
+    """Calculate percentage change, handle division by zero."""
+    if previous == 0:
+        return 0.0
+    return ((current - previous) / previous) * 100
+
 def check_directional_signal(df, spot_price, symbol):
     if symbol != "NIFTY":
         return
@@ -104,18 +112,17 @@ def check_directional_signal(df, spot_price, symbol):
     # Add current snapshot to history
     history.append(current_snapshot)
     if len(history) > MAX_HISTORY:
-        history = history[-MAX_HISTORY:]  # Keep only last 4
+        history = history[-MAX_HISTORY:]
 
     # Save updated state
     save_state(symbol, {'history': history})
 
-    # Need at least 2 snapshots to compare (current + one previous)
+    # Need at least 2 snapshots to compare
     if len(history) < 2:
         print("✅ Initial state saved. Need one more snapshot for comparison.")
         return
 
-    # Check bullish and bearish conditions for each timeframe
-    # Timeframe indices: -1 = current (now), -2 = 5 min ago, -3 = 10 min ago, -4 = 15 min ago
+    # Timeframe indices: -1 = current, -2 = 5 min, -3 = 10 min, -4 = 15 min
     timeframes = {
         '5-min': -2,
         '10-min': -3,
@@ -128,48 +135,48 @@ def check_directional_signal(df, spot_price, symbol):
     bearish_details = {}
 
     for label, idx in timeframes.items():
-        if len(history) < abs(idx) + 1:  # Not enough history for this timeframe
+        if len(history) < abs(idx) + 1:
             continue
 
         prev = history[idx]
         curr = history[-1]
 
-        # Calculate changes
-        delta_atm_ce = curr['atm_ce_iv'] - prev['atm_ce_iv']
-        delta_atm_pe = curr['atm_pe_iv'] - prev['atm_pe_iv']
-        delta_otm_call = curr['otm_call_avg'] - prev['otm_call_avg']
-        delta_otm_below_put = curr['otm_below_put_avg'] - prev['otm_below_put_avg']
+        # Calculate percentage changes
+        pct_delta_atm_ce = calculate_percentage_change(curr['atm_ce_iv'], prev['atm_ce_iv'])
+        pct_delta_atm_pe = calculate_percentage_change(curr['atm_pe_iv'], prev['atm_pe_iv'])
+        pct_delta_otm_call = calculate_percentage_change(curr['otm_call_avg'], prev['otm_call_avg'])
+        pct_delta_otm_below_put = calculate_percentage_change(curr['otm_below_put_avg'], prev['otm_below_put_avg'])
 
-        # Check bullish condition
+        # Check bullish condition (percentage-based)
         is_bullish = (
-            delta_atm_ce > BULLISH_CALL_RISE and
-            delta_atm_pe < BULLISH_PUT_FALL and
-            delta_otm_call > BULLISH_OTM_CALL_RISE and
-            delta_otm_below_put < BULLISH_OTM_PUT_FALL
+            pct_delta_atm_ce > BULLISH_CALL_RISE_PCT and
+            pct_delta_atm_pe < BULLISH_PUT_FALL_PCT and
+            pct_delta_otm_call > BULLISH_OTM_CALL_RISE_PCT and
+            pct_delta_otm_below_put < BULLISH_OTM_PUT_FALL_PCT
         )
         if is_bullish:
             bullish_timeframes.append(label)
             bullish_details[label] = {
-                'atm_ce_iv': (prev['atm_ce_iv'], curr['atm_ce_iv'], delta_atm_ce),
-                'atm_pe_iv': (prev['atm_pe_iv'], curr['atm_pe_iv'], delta_atm_pe),
-                'otm_call_avg': (prev['otm_call_avg'], curr['otm_call_avg'], delta_otm_call),
-                'otm_below_put_avg': (prev['otm_below_put_avg'], curr['otm_below_put_avg'], delta_otm_below_put),
+                'atm_ce_iv': (prev['atm_ce_iv'], curr['atm_ce_iv'], pct_delta_atm_ce),
+                'atm_pe_iv': (prev['atm_pe_iv'], curr['atm_pe_iv'], pct_delta_atm_pe),
+                'otm_call_avg': (prev['otm_call_avg'], curr['otm_call_avg'], pct_delta_otm_call),
+                'otm_below_put_avg': (prev['otm_below_put_avg'], curr['otm_below_put_avg'], pct_delta_otm_below_put),
             }
 
-        # Check bearish condition
+        # Check bearish condition (percentage-based)
         is_bearish = (
-            delta_atm_pe > BEARISH_PUT_RISE and
-            delta_atm_ce < BEARISH_CALL_FALL and
-            delta_otm_below_put > BEARISH_OTM_PUT_RISE and
-            delta_otm_call < BEARISH_OTM_CALL_FALL
+            pct_delta_atm_pe > BEARISH_PUT_RISE_PCT and
+            pct_delta_atm_ce < BEARISH_CALL_FALL_PCT and
+            pct_delta_otm_below_put > BEARISH_OTM_PUT_RISE_PCT and
+            pct_delta_otm_call < BEARISH_OTM_CALL_FALL_PCT
         )
         if is_bearish:
             bearish_timeframes.append(label)
             bearish_details[label] = {
-                'atm_pe_iv': (prev['atm_pe_iv'], curr['atm_pe_iv'], delta_atm_pe),
-                'atm_ce_iv': (prev['atm_ce_iv'], curr['atm_ce_iv'], delta_atm_ce),
-                'otm_below_put_avg': (prev['otm_below_put_avg'], curr['otm_below_put_avg'], delta_otm_below_put),
-                'otm_call_avg': (prev['otm_call_avg'], curr['otm_call_avg'], delta_otm_call),
+                'atm_pe_iv': (prev['atm_pe_iv'], curr['atm_pe_iv'], pct_delta_atm_pe),
+                'atm_ce_iv': (prev['atm_ce_iv'], curr['atm_ce_iv'], pct_delta_atm_ce),
+                'otm_below_put_avg': (prev['otm_below_put_avg'], curr['otm_below_put_avg'], pct_delta_otm_below_put),
+                'otm_call_avg': (prev['otm_call_avg'], curr['otm_call_avg'], pct_delta_otm_call),
             }
 
     # Build and send alert
@@ -178,20 +185,20 @@ def check_directional_signal(df, spot_price, symbol):
         msg = f"⚠️ *MIXED SIGNAL* ({symbol} Spot: {spot_price:.2f})\n\n"
         msg += f"🟢 Bullish at: {', '.join(bullish_timeframes)}\n"
         msg += f"🔴 Bearish at: {', '.join(bearish_timeframes)}\n\n"
-        msg += "🟢 *Bullish Details:*\n"
+        msg += "🟢 *Bullish Details (% change):*\n"
         for label in bullish_timeframes:
             d = bullish_details[label]
-            msg += f"  *{label}*: ATM Call {d['atm_ce_iv'][0]:.2f}→{d['atm_ce_iv'][1]:.2f} (Δ{d['atm_ce_iv'][2]:+.2f}) | "
-            msg += f"ATM Put {d['atm_pe_iv'][0]:.2f}→{d['atm_pe_iv'][1]:.2f} (Δ{d['atm_pe_iv'][2]:+.2f})\n"
-            msg += f"    OTM Call {d['otm_call_avg'][0]:.2f}→{d['otm_call_avg'][1]:.2f} (Δ{d['otm_call_avg'][2]:+.2f}) | "
-            msg += f"OTM Put {d['otm_below_put_avg'][0]:.2f}→{d['otm_below_put_avg'][1]:.2f} (Δ{d['otm_below_put_avg'][2]:+.2f})\n"
-        msg += "\n🔴 *Bearish Details:*\n"
+            msg += f"  *{label}*: ATM Call {d['atm_ce_iv'][0]:.2f}→{d['atm_ce_iv'][1]:.2f} ({d['atm_ce_iv'][2]:+.1f}%) | "
+            msg += f"ATM Put {d['atm_pe_iv'][0]:.2f}→{d['atm_pe_iv'][1]:.2f} ({d['atm_pe_iv'][2]:+.1f}%)\n"
+            msg += f"    OTM Call {d['otm_call_avg'][0]:.2f}→{d['otm_call_avg'][1]:.2f} ({d['otm_call_avg'][2]:+.1f}%) | "
+            msg += f"OTM Put {d['otm_below_put_avg'][0]:.2f}→{d['otm_below_put_avg'][1]:.2f} ({d['otm_below_put_avg'][2]:+.1f}%)\n"
+        msg += "\n🔴 *Bearish Details (% change):*\n"
         for label in bearish_timeframes:
             d = bearish_details[label]
-            msg += f"  *{label}*: ATM Put {d['atm_pe_iv'][0]:.2f}→{d['atm_pe_iv'][1]:.2f} (Δ{d['atm_pe_iv'][2]:+.2f}) | "
-            msg += f"ATM Call {d['atm_ce_iv'][0]:.2f}→{d['atm_ce_iv'][1]:.2f} (Δ{d['atm_ce_iv'][2]:+.2f})\n"
-            msg += f"    OTM Put {d['otm_below_put_avg'][0]:.2f}→{d['otm_below_put_avg'][1]:.2f} (Δ{d['otm_below_put_avg'][2]:+.2f}) | "
-            msg += f"OTM Call {d['otm_call_avg'][0]:.2f}→{d['otm_call_avg'][1]:.2f} (Δ{d['otm_call_avg'][2]:+.2f})\n"
+            msg += f"  *{label}*: ATM Put {d['atm_pe_iv'][0]:.2f}→{d['atm_pe_iv'][1]:.2f} ({d['atm_pe_iv'][2]:+.1f}%) | "
+            msg += f"ATM Call {d['atm_ce_iv'][0]:.2f}→{d['atm_ce_iv'][1]:.2f} ({d['atm_ce_iv'][2]:+.1f}%)\n"
+            msg += f"    OTM Put {d['otm_below_put_avg'][0]:.2f}→{d['otm_below_put_avg'][1]:.2f} ({d['otm_below_put_avg'][2]:+.1f}%) | "
+            msg += f"OTM Call {d['otm_call_avg'][0]:.2f}→{d['otm_call_avg'][1]:.2f} ({d['otm_call_avg'][2]:+.1f}%)\n"
         send_telegram(msg)
 
     elif bullish_timeframes:
@@ -201,13 +208,13 @@ def check_directional_signal(df, spot_price, symbol):
         non_bullish = [t for t in timeframes.keys() if t not in bullish_timeframes]
         if non_bullish:
             msg += f"⏳ Not confirmed at: {', '.join(non_bullish)}\n\n"
-        msg += "*Changes:*\n"
+        msg += "*% Changes:*\n"
         for label in bullish_timeframes:
             d = bullish_details[label]
-            msg += f"  *{label}*: ATM Call {d['atm_ce_iv'][0]:.2f}→{d['atm_ce_iv'][1]:.2f} (Δ{d['atm_ce_iv'][2]:+.2f}) | "
-            msg += f"ATM Put {d['atm_pe_iv'][0]:.2f}→{d['atm_pe_iv'][1]:.2f} (Δ{d['atm_pe_iv'][2]:+.2f})\n"
-            msg += f"    OTM Call {d['otm_call_avg'][0]:.2f}→{d['otm_call_avg'][1]:.2f} (Δ{d['otm_call_avg'][2]:+.2f}) | "
-            msg += f"OTM Put {d['otm_below_put_avg'][0]:.2f}→{d['otm_below_put_avg'][1]:.2f} (Δ{d['otm_below_put_avg'][2]:+.2f})\n"
+            msg += f"  *{label}*: ATM Call {d['atm_ce_iv'][0]:.2f}→{d['atm_ce_iv'][1]:.2f} ({d['atm_ce_iv'][2]:+.1f}%) | "
+            msg += f"ATM Put {d['atm_pe_iv'][0]:.2f}→{d['atm_pe_iv'][1]:.2f} ({d['atm_pe_iv'][2]:+.1f}%)\n"
+            msg += f"    OTM Call {d['otm_call_avg'][0]:.2f}→{d['otm_call_avg'][1]:.2f} ({d['otm_call_avg'][2]:+.1f}%) | "
+            msg += f"OTM Put {d['otm_below_put_avg'][0]:.2f}→{d['otm_below_put_avg'][1]:.2f} ({d['otm_below_put_avg'][2]:+.1f}%)\n"
         send_telegram(msg)
 
     elif bearish_timeframes:
@@ -217,13 +224,13 @@ def check_directional_signal(df, spot_price, symbol):
         non_bearish = [t for t in timeframes.keys() if t not in bearish_timeframes]
         if non_bearish:
             msg += f"⏳ Not confirmed at: {', '.join(non_bearish)}\n\n"
-        msg += "*Changes:*\n"
+        msg += "*% Changes:*\n"
         for label in bearish_timeframes:
             d = bearish_details[label]
-            msg += f"  *{label}*: ATM Put {d['atm_pe_iv'][0]:.2f}→{d['atm_pe_iv'][1]:.2f} (Δ{d['atm_pe_iv'][2]:+.2f}) | "
-            msg += f"ATM Call {d['atm_ce_iv'][0]:.2f}→{d['atm_ce_iv'][1]:.2f} (Δ{d['atm_ce_iv'][2]:+.2f})\n"
-            msg += f"    OTM Put {d['otm_below_put_avg'][0]:.2f}→{d['otm_below_put_avg'][1]:.2f} (Δ{d['otm_below_put_avg'][2]:+.2f}) | "
-            msg += f"OTM Call {d['otm_call_avg'][0]:.2f}→{d['otm_call_avg'][1]:.2f} (Δ{d['otm_call_avg'][2]:+.2f})\n"
+            msg += f"  *{label}*: ATM Put {d['atm_pe_iv'][0]:.2f}→{d['atm_pe_iv'][1]:.2f} ({d['atm_pe_iv'][2]:+.1f}%) | "
+            msg += f"ATM Call {d['atm_ce_iv'][0]:.2f}→{d['atm_ce_iv'][1]:.2f} ({d['atm_ce_iv'][2]:+.1f}%)\n"
+            msg += f"    OTM Put {d['otm_below_put_avg'][0]:.2f}→{d['otm_below_put_avg'][1]:.2f} ({d['otm_below_put_avg'][2]:+.1f}%) | "
+            msg += f"OTM Call {d['otm_call_avg'][0]:.2f}→{d['otm_call_avg'][1]:.2f} ({d['otm_call_avg'][2]:+.1f}%)\n"
         send_telegram(msg)
 
     else:
