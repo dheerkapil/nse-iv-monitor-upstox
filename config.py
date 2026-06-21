@@ -17,15 +17,15 @@ INSTRUMENTS = {
 
 TRACK_INDICES = ["NIFTY"]  # Only NIFTY for now
 
-# ========== ALERT THRESHOLDS (adjust as needed) ==========
-# Bullish signals
-BULLISH_CALL_RISE = 0.25      # ATM Call IV must increase by more than this (percentage points)
-BULLISH_PUT_FALL = -0.25      # ATM Put IV must decrease by more than this (negative value)
-BULLISH_OTM_CALL_RISE = 0.25  # OTM Call average IV must increase by more than this
-BULLISH_OTM_PUT_FALL = -0.25  # OTM Put average IV must decrease by more than this (below ATM)
+# ========== ALERT THRESHOLDS (Percentage-Based) ==========
+# Bullish signals (percentage change relative to previous value)
+BULLISH_CALL_RISE_PCT = 5.0      # ATM Call IV must increase by more than 5%
+BULLISH_PUT_FALL_PCT = -3.0      # ATM Put IV must decrease by more than 3%
+BULLISH_OTM_CALL_RISE_PCT = 5.0  # OTM Call average IV must increase by more than 5%
+BULLISH_OTM_PUT_FALL_PCT = -3.0  # OTM Put average IV must decrease by more than 3%
 
 # Bearish signals
-BEARISH_PUT_RISE = 0.25       # ATM Put IV must increase by more than this
-BEARISH_CALL_FALL = -0.25     # ATM Call IV must decrease by more than this (negative)
-BEARISH_OTM_PUT_RISE = 0.25   # OTM Put average IV must increase by more than this (below ATM)
-BEARISH_OTM_CALL_FALL = -0.25 # OTM Call average IV must decrease by more than this (above ATM)
+BEARISH_PUT_RISE_PCT = 5.0       # ATM Put IV must increase by more than 5%
+BEARISH_CALL_FALL_PCT = -3.0     # ATM Call IV must decrease by more than 3%
+BEARISH_OTM_PUT_RISE_PCT = 5.0   # OTM Put average IV must increase by more than 5%
+BEARISH_OTM_CALL_FALL_PCT = -3.0 # OTM Call average IV must decrease by more than 3%
