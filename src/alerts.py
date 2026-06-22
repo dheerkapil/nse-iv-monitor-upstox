@@ -10,7 +10,7 @@ from config import (
 )
 
 CACHE_FILE = 'iv_state.json'
-MAX_HISTORY = 4  # Current + 3 previous snapshots (5-min, 10-min, 15-min)
+MAX_HISTORY = 5   # Current + 4 previous (for 5,10,15,20 min) – allows 15-min comparison
 
 def send_telegram(message):
     bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -74,7 +74,7 @@ def calculate_percentage_change(current, previous):
     return ((current - previous) / previous) * 100
 
 def check_directional_signal(df, spot_price, symbol):
-    if symbol != "NIFTY":
+    if symbol != "NIFTY" and symbol != "BANKNIFTY":
         return
 
     # Calculate current IV snapshot
@@ -122,7 +122,6 @@ def check_directional_signal(df, spot_price, symbol):
         print("✅ Initial state saved. Need one more snapshot for comparison.")
         return
 
-    # Timeframe indices: -1 = current, -2 = 5 min, -3 = 10 min, -4 = 15 min
     timeframes = {
         '5-min': -2,
         '10-min': -3,
@@ -149,11 +148,10 @@ def check_directional_signal(df, spot_price, symbol):
         pct_delta_otm_call = calculate_percentage_change(curr['otm_call_avg'], prev['otm_call_avg'])
         pct_delta_otm_below_put = calculate_percentage_change(curr['otm_below_put_avg'], prev['otm_below_put_avg'])
 
-        # Print debug info
         print(f"  {label}: ATM CE {pct_delta_atm_ce:+.2f}% | ATM PE {pct_delta_atm_pe:+.2f}% | "
               f"OTM Call {pct_delta_otm_call:+.2f}% | OTM Put {pct_delta_otm_below_put:+.2f}%")
 
-        # Check bullish condition (percentage-based)
+        # Bullish condition
         is_bullish = (
             pct_delta_atm_ce > BULLISH_CALL_RISE_PCT and
             pct_delta_atm_pe < BULLISH_PUT_FALL_PCT and
@@ -169,7 +167,7 @@ def check_directional_signal(df, spot_price, symbol):
                 'otm_below_put_avg': (prev['otm_below_put_avg'], curr['otm_below_put_avg'], pct_delta_otm_below_put),
             }
 
-        # Check bearish condition (percentage-based)
+        # Bearish condition
         is_bearish = (
             pct_delta_atm_pe > BEARISH_PUT_RISE_PCT and
             pct_delta_atm_ce < BEARISH_CALL_FALL_PCT and
@@ -187,9 +185,8 @@ def check_directional_signal(df, spot_price, symbol):
 
     print(f"\n📊 Summary: Bullish timeframes = {bullish_timeframes}, Bearish timeframes = {bearish_timeframes}")
 
-    # Build and send alert
+    # Send alerts
     if bullish_timeframes and bearish_timeframes:
-        # Mixed signal
         msg = f"⚠️ *MIXED SIGNAL* ({symbol} Spot: {spot_price:.2f})\n\n"
         msg += f"🟢 Bullish at: {', '.join(bullish_timeframes)}\n"
         msg += f"🔴 Bearish at: {', '.join(bearish_timeframes)}\n\n"
@@ -210,7 +207,6 @@ def check_directional_signal(df, spot_price, symbol):
         send_telegram(msg)
 
     elif bullish_timeframes:
-        # Pure bullish
         msg = f"🟢 *BULLISH Signal* ({symbol} Spot: {spot_price:.2f})\n\n"
         msg += f"✅ Triggered at: {', '.join(bullish_timeframes)}\n"
         non_bullish = [t for t in timeframes.keys() if t not in bullish_timeframes]
@@ -226,7 +222,6 @@ def check_directional_signal(df, spot_price, symbol):
         send_telegram(msg)
 
     elif bearish_timeframes:
-        # Pure bearish
         msg = f"🔴 *BEARISH Signal* ({symbol} Spot: {spot_price:.2f})\n\n"
         msg += f"✅ Triggered at: {', '.join(bearish_timeframes)}\n"
         non_bearish = [t for t in timeframes.keys() if t not in bearish_timeframes]
