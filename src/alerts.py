@@ -134,8 +134,10 @@ def check_directional_signal(df, spot_price, symbol):
     bullish_details = {}
     bearish_details = {}
 
+    print("\n🔍 DEBUG – Percentage changes for each timeframe:")
     for label, idx in timeframes.items():
         if len(history) < abs(idx) + 1:
+            print(f"  {label}: Not enough history (need {abs(idx)+1}, have {len(history)})")
             continue
 
         prev = history[idx]
@@ -146,6 +148,10 @@ def check_directional_signal(df, spot_price, symbol):
         pct_delta_atm_pe = calculate_percentage_change(curr['atm_pe_iv'], prev['atm_pe_iv'])
         pct_delta_otm_call = calculate_percentage_change(curr['otm_call_avg'], prev['otm_call_avg'])
         pct_delta_otm_below_put = calculate_percentage_change(curr['otm_below_put_avg'], prev['otm_below_put_avg'])
+
+        # Print debug info
+        print(f"  {label}: ATM CE {pct_delta_atm_ce:+.2f}% | ATM PE {pct_delta_atm_pe:+.2f}% | "
+              f"OTM Call {pct_delta_otm_call:+.2f}% | OTM Put {pct_delta_otm_below_put:+.2f}%")
 
         # Check bullish condition (percentage-based)
         is_bullish = (
@@ -178,6 +184,8 @@ def check_directional_signal(df, spot_price, symbol):
                 'otm_below_put_avg': (prev['otm_below_put_avg'], curr['otm_below_put_avg'], pct_delta_otm_below_put),
                 'otm_call_avg': (prev['otm_call_avg'], curr['otm_call_avg'], pct_delta_otm_call),
             }
+
+    print(f"\n📊 Summary: Bullish timeframes = {bullish_timeframes}, Bearish timeframes = {bearish_timeframes}")
 
     # Build and send alert
     if bullish_timeframes and bearish_timeframes:
