@@ -1,9 +1,11 @@
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
+import calendar
 from config import UPSTOX_API_BASE, HEADERS
 
 def get_next_tuesday_expiry():
+    """Return next Tuesday for NIFTY (weekly)."""
     today = datetime.today()
     days_ahead = (1 - today.weekday()) % 7
     if days_ahead == 0:
@@ -11,10 +13,49 @@ def get_next_tuesday_expiry():
     next_tue = today + timedelta(days=days_ahead)
     return next_tue.strftime("%Y-%m-%d")
 
-def fetch_option_chain(instrument_key, expiry_date=None):
-    if expiry_date is None:
-        expiry_date = get_next_tuesday_expiry()
+def get_last_tuesday_of_month(year, month):
+    """Return the last Tuesday of a given month."""
+    last_day = calendar.monthrange(year, month)[1]
+    last_date = datetime(year, month, last_day)
+    # weekday: Monday=0, Tuesday=1, ...
+    days_back = (last_date.weekday() - 1) % 7
+    last_tuesday = last_date - timedelta(days=days_back)
+    return last_tuesday
 
+def get_expiry_date(symbol):
+    """
+    Return expiry date (YYYY-MM-DD) based on instrument:
+    - NIFTY: next Tuesday (weekly)
+    - BANKNIFTY: last Tuesday of current month (monthly)
+    """
+    today = datetime.today()
+    
+    if symbol == "NIFTY":
+        return get_next_tuesday_expiry()
+    
+    elif symbol == "BANKNIFTY":
+        year = today.year
+        month = today.month
+        last_tue = get_last_tuesday_of_month(year, month)
+        # If last_tue is before today, move to next month
+        if last_tue.date() < today.date():
+            if month == 12:
+                year += 1
+                month = 1
+            else:
+                month += 1
+            last_tue = get_last_tuesday_of_month(year, month)
+        return last_tue.strftime("%Y-%m-%d")
+    
+    else:
+        # Fallback to next Tuesday
+        return get_next_tuesday_expiry()
+
+def fetch_option_chain(instrument_key, expiry_date):
+    """
+    Fetch option chain for a given instrument and expiry date.
+    Returns: (DataFrame, spot_price) or (None, None) on failure.
+    """
     url = f"{UPSTOX_API_BASE}/option/chain"
     params = {
         "instrument_key": instrument_key,
@@ -36,17 +77,10 @@ def fetch_option_chain(instrument_key, expiry_date=None):
             return None, None
 
         rows = []
-        
-        # Extract spot price from API response
+        # Extract spot price
         spot_price = data.get('underlying_spot', 'N/A')
         if spot_price == 'N/A' and data['data']:
             spot_price = data['data'][0].get('underlying_spot_price', 'N/A')
-        
-        # Ensure spot_price is a clean string for later parsing
-        if isinstance(spot_price, (int, float)):
-            spot_price = str(spot_price)
-        elif spot_price is None:
-            spot_price = 'N/A'
 
         for strike_data in data['data']:
             call = strike_data.get('call_options') or {}
