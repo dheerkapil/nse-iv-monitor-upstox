@@ -50,10 +50,10 @@ def get_expiry_date(symbol):
     else:
         return get_next_tuesday_expiry()
 
-def fetch_option_chain(instrument_key, expiry_date):
+def fetch_option_chain(instrument_key, expiry_date, retries=3, timeout=60):
     """
-    Fetch option chain for a given instrument and expiry date.
-    Returns: (DataFrame, spot_price) or (None, None) on failure.
+    Fetch option chain with retry logic.
+    instrument_key is already correct: NSE_INDEX|Nifty Bank for BANKNIFTY
     """
     url = f"{UPSTOX_API_BASE}/option/chain"
     params = {
@@ -63,13 +63,27 @@ def fetch_option_chain(instrument_key, expiry_date):
 
     print(f"📡 Fetching {instrument_key} exp {expiry_date}...")
 
-    try:
-        response = requests.get(url, headers=HEADERS, params=params, timeout=30)
-
-        if response.status_code != 200:
-            print(f"❌ API Error {response.status_code}: {response.text[:200]}")
+    for attempt in range(retries + 1):
+        try:
+            response = requests.get(url, headers=HEADERS, params=params, timeout=timeout)
+            if response.status_code == 200:
+                break
+            else:
+                print(f"⚠️ Attempt {attempt+1}: Status {response.status_code}")
+                if attempt == retries:
+                    print(f"❌ API Error {response.status_code}: {response.text[:200]}")
+                    return None, None
+        except requests.exceptions.Timeout:
+            print(f"⏰ Attempt {attempt+1} timed out. Retrying...")
+            if attempt == retries:
+                print("❌ All retries failed due to timeout.")
+                return None, None
+        except Exception as e:
+            print(f"❌ Exception: {e}")
             return None, None
 
+    # Process response
+    try:
         data = response.json()
         if not data.get('data'):
             print("❌ No data in response")
@@ -119,5 +133,5 @@ def fetch_option_chain(instrument_key, expiry_date):
         return df, spot_price
 
     except Exception as e:
-        print(f"❌ Exception in fetch_option_chain: {e}")
+        print(f"❌ Exception in processing: {e}")
         return None, None
