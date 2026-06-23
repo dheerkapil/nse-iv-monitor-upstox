@@ -234,6 +234,11 @@ def check_directional_signal(df, spot_price, symbol):
         prev_snapshot = history[idx]
         curr_snapshot = history[-1]
 
+        # --- Check if both snapshots have per-strike dictionaries ---
+        if ('ce_iv_by_strike' not in prev_snapshot or 'ce_iv_by_strike' not in curr_snapshot):
+            print(f"  {label}: Snapshot format mismatch (missing per-strike data) – skipping. Cache will rebuild.")
+            continue
+
         # Get IVs for the same strike (current ATM strike)
         curr_ce_iv = curr_snapshot['ce_iv_by_strike'].get(atm_strike)
         prev_ce_iv = prev_snapshot['ce_iv_by_strike'].get(atm_strike)
@@ -295,7 +300,11 @@ def check_directional_signal(df, spot_price, symbol):
     if bullish_timeframes or bearish_timeframes:
         # Smart Money Score (uses previous snapshot, same strike)
         prev_snapshot = history[-2]  # 5-min ago
-        call_score, put_score, interp = calculate_smart_money_score(df, atm_strike, prev_snapshot)
+        # But only if it has the new keys
+        if 'ce_iv_by_strike' in prev_snapshot:
+            call_score, put_score, interp = calculate_smart_money_score(df, atm_strike, prev_snapshot)
+        else:
+            call_score, put_score, interp = 0, 0, "⚪ Smart Money data unavailable (cache rebuilding)"
 
         if bullish_timeframes and not bearish_timeframes:
             msg = f"🟢 *BULLISH Signal* ({symbol} Spot: {spot_price:.2f})\n\n"
