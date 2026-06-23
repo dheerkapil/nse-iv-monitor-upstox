@@ -2,53 +2,84 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta
 import calendar
-from config import UPSTOX_API_BASE, HEADERS, INSTRUMENTS
+from config import UPSTOX_API_BASE, HEADERS
 
-# ----- Expiry fetching from Upstox API -----
-def get_available_expiries(instrument_key):
-    """Fetch list of available expiry dates for an instrument from Upstox."""
-    url = f"{UPSTOX_API_BASE}/option/expiry"
-    params = {"instrument_key": instrument_key}
-    try:
-        resp = requests.get(url, headers=HEADERS, params=params, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            expiries = data.get('data', [])
-            if expiries:
-                return sorted(expiries)  # nearest first
-            else:
-                print(f"⚠️ No expiries returned for {instrument_key}")
-        else:
-            print(f"⚠️ Expiry API error {resp.status_code}: {resp.text[:100]}")
-    except Exception as e:
-        print(f"⚠️ Expiry API exception: {e}")
-    return None
+# ----- Static Holiday List (2026-2027) -----
+def get_holidays():
+    """Return set of NSE trading holidays (YYYY-MM-DD)."""
+    return {
+        # 2026
+        "2026-01-26", "2026-03-03", "2026-04-03", "2026-04-14",
+        "2026-05-28", "2026-08-15", "2026-10-02", "2026-12-25",
+        # 2027
+        "2027-01-26", "2027-03-22", "2027-04-02", "2027-04-14",
+        "2027-10-02", "2027-12-25",
+    }
+
+def is_trading_day(date_str):
+    """Check if date is a weekday and not a holiday."""
+    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+    if date_obj.weekday() >= 5:  # Saturday or Sunday
+        return False
+    return date_str not in get_holidays()
+
+def adjust_to_previous_trading_day(date_str, max_attempts=10):
+    """Move backwards until a trading day is found."""
+    current = datetime.strptime(date_str, "%Y-%m-%d")
+    for _ in range(max_attempts):
+        check = current.strftime("%Y-%m-%d")
+        if is_trading_day(check):
+            return check
+        current -= timedelta(days=1)
+    # Fallback: return original (should not happen)
+    return date_str
 
 def get_next_tuesday_expiry():
-    """Fallback: calculate next Tuesday (no holiday adjustment)."""
+    """Return today if Tuesday and trading day, else next Tuesday."""
     today = datetime.today()
+    # If today is Tuesday (weekday=1) and trading day, use today
+    if today.weekday() == 1 and is_trading_day(today.strftime("%Y-%m-%d")):
+        return today.strftime("%Y-%m-%d")
+    # Otherwise find next Tuesday
     days_ahead = (1 - today.weekday()) % 7
     if days_ahead == 0:
         days_ahead = 7
     next_tue = today + timedelta(days=days_ahead)
-    return next_tue.strftime("%Y-%m-%d")
+    return adjust_to_previous_trading_day(next_tue.strftime("%Y-%m-%d"))
+
+def get_last_tuesday_of_month(year, month):
+    last_day = calendar.monthrange(year, month)[1]
+    last_date = datetime(year, month, last_day)
+    days_back = (last_date.weekday() - 1) % 7
+    return last_date - timedelta(days=days_back)
 
 def get_expiry_date(symbol):
     """
-    Return the nearest available expiry for the symbol.
-    Uses Upstox expiry API, fallback to next Tuesday if fails.
+    Return expiry date (YYYY-MM-DD) with holiday adjustment.
+    - NIFTY: today if Tuesday else next Tuesday (weekly)
+    - BANKNIFTY: last Tuesday of current month (monthly)
     """
-    instrument_key = INSTRUMENTS.get(symbol)
-    if not instrument_key:
+    today = datetime.today()
+    
+    if symbol == "NIFTY":
         return get_next_tuesday_expiry()
     
-    expiries = get_available_expiries(instrument_key)
-    if expiries:
-        nearest = expiries[0]
-        print(f"📅 Nearest expiry for {symbol}: {nearest}")
-        return nearest
+    elif symbol == "BANKNIFTY":
+        year = today.year
+        month = today.month
+        last_tue = get_last_tuesday_of_month(year, month)
+        # If last_tue is before today, move to next month
+        if last_tue.date() < today.date():
+            if month == 12:
+                year += 1
+                month = 1
+            else:
+                month += 1
+            last_tue = get_last_tuesday_of_month(year, month)
+        expiry = last_tue.strftime("%Y-%m-%d")
+        return adjust_to_previous_trading_day(expiry)
+    
     else:
-        print(f"⚠️ Falling back to Tuesday calculation for {symbol}")
         return get_next_tuesday_expiry()
 
 # ----- Fetch option chain (unchanged) -----
