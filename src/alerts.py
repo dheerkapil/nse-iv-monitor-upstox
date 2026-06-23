@@ -11,7 +11,7 @@ from config import (
 
 CACHE_FILE = 'iv_state.json'
 MAX_HISTORY = 5
-ALERT_COOLDOWN_MINUTES = 30  # No repeat alerts within this time
+ALERT_COOLDOWN_MINUTES = 30
 
 def send_telegram(message):
     bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -74,43 +74,43 @@ def calculate_percentage_change(current, previous):
 def calculate_smart_money_score(df, atm_strike, prev_data):
     """
     Simplified Smart Money Score using OI, IV, Delta, Gamma, Theta, Vega.
-    Returns: call_score (0-6), put_score (0-6), interpretation string
+    Uses previous snapshot's values for the SAME strike.
     """
     row = df[df['strike'] == atm_strike].iloc[0]
 
-    # --- Call Side ---
-    ce_oi_change = row['ce_oi'] - prev_data.get('ce_oi', row['ce_oi'])
-    ce_iv_change = row['ce_iv'] - prev_data.get('ce_iv', row['ce_iv'])
-    ce_delta_change = row['ce_delta'] - prev_data.get('ce_delta', row['ce_delta'])
-    ce_gamma_change = row['ce_gamma'] - prev_data.get('ce_gamma', row['ce_gamma'])
-    ce_theta_change = row['ce_theta'] - prev_data.get('ce_theta', row['ce_theta'])
-    ce_vega_change = row['ce_vega'] - prev_data.get('ce_vega', row['ce_vega'])
+    # Get previous values for this same strike (if available)
+    prev_ce_oi = prev_data.get('ce_oi_by_strike', {}).get(atm_strike, row['ce_oi'])
+    prev_pe_oi = prev_data.get('pe_oi_by_strike', {}).get(atm_strike, row['pe_oi'])
+    prev_ce_iv = prev_data.get('ce_iv_by_strike', {}).get(atm_strike, row['ce_iv'])
+    prev_pe_iv = prev_data.get('pe_iv_by_strike', {}).get(atm_strike, row['pe_iv'])
+    prev_ce_delta = prev_data.get('ce_delta_by_strike', {}).get(atm_strike, row['ce_delta'])
+    prev_pe_delta = prev_data.get('pe_delta_by_strike', {}).get(atm_strike, row['pe_delta'])
+    prev_ce_gamma = prev_data.get('ce_gamma_by_strike', {}).get(atm_strike, row['ce_gamma'])
+    prev_pe_gamma = prev_data.get('pe_gamma_by_strike', {}).get(atm_strike, row['pe_gamma'])
+    prev_ce_theta = prev_data.get('ce_theta_by_strike', {}).get(atm_strike, row['ce_theta'])
+    prev_pe_theta = prev_data.get('pe_theta_by_strike', {}).get(atm_strike, row['pe_theta'])
+    prev_ce_vega = prev_data.get('ce_vega_by_strike', {}).get(atm_strike, row['ce_vega'])
+    prev_pe_vega = prev_data.get('pe_vega_by_strike', {}).get(atm_strike, row['pe_vega'])
 
+    # --- Call Side ---
     call_score = 0
-    if ce_oi_change > 0: call_score += 1
-    if ce_iv_change > 0: call_score += 1
-    if ce_delta_change > 0: call_score += 1
-    if ce_gamma_change > 0: call_score += 1
-    if ce_theta_change < 0: call_score += 1
-    if ce_vega_change < 0: call_score += 1
+    if row['ce_oi'] > prev_ce_oi: call_score += 1
+    if row['ce_iv'] > prev_ce_iv: call_score += 1
+    if row['ce_delta'] > prev_ce_delta: call_score += 1
+    if row['ce_gamma'] > prev_ce_gamma: call_score += 1
+    if row['ce_theta'] < prev_ce_theta: call_score += 1
+    if row['ce_vega'] < prev_ce_vega: call_score += 1
 
     # --- Put Side ---
-    pe_oi_change = row['pe_oi'] - prev_data.get('pe_oi', row['pe_oi'])
-    pe_iv_change = row['pe_iv'] - prev_data.get('pe_iv', row['pe_iv'])
-    pe_delta_change = row['pe_delta'] - prev_data.get('pe_delta', row['pe_delta'])
-    pe_gamma_change = row['pe_gamma'] - prev_data.get('pe_gamma', row['pe_gamma'])
-    pe_theta_change = row['pe_theta'] - prev_data.get('pe_theta', row['pe_theta'])
-    pe_vega_change = row['pe_vega'] - prev_data.get('pe_vega', row['pe_vega'])
-
     put_score = 0
-    if pe_oi_change > 0: put_score += 1
-    if pe_iv_change > 0: put_score += 1
-    if pe_delta_change < 0: put_score += 1
-    if pe_gamma_change > 0: put_score += 1
-    if pe_theta_change < 0: put_score += 1
-    if pe_vega_change < 0: put_score += 1
+    if row['pe_oi'] > prev_pe_oi: put_score += 1
+    if row['pe_iv'] > prev_pe_iv: put_score += 1
+    if row['pe_delta'] < prev_pe_delta: put_score += 1
+    if row['pe_gamma'] > prev_pe_gamma: put_score += 1
+    if row['pe_theta'] < prev_pe_theta: put_score += 1
+    if row['pe_vega'] < prev_pe_vega: put_score += 1
 
-    # Interpretation (for context only – not used for filtering)
+    # Interpretation (context only)
     if call_score >= 4 and put_score <= 2:
         interp = "🟢 STRONG BULLISH (Smart money buying calls)"
     elif put_score >= 4 and call_score <= 2:
@@ -126,17 +126,48 @@ def check_directional_signal(df, spot_price, symbol):
     if symbol not in ["NIFTY", "BANKNIFTY"]:
         return
 
-    # Calculate current IV snapshot
+    # --- Build current snapshot with per-strike IV and Greeks ---
     atm_strike = get_atm_strike(df, spot_price)
+
+    # Build dictionaries for per-strike values (for all strikes in the chain)
+    ce_iv_by_strike = {}
+    pe_iv_by_strike = {}
+    ce_oi_by_strike = {}
+    pe_oi_by_strike = {}
+    ce_delta_by_strike = {}
+    pe_delta_by_strike = {}
+    ce_gamma_by_strike = {}
+    pe_gamma_by_strike = {}
+    ce_theta_by_strike = {}
+    pe_theta_by_strike = {}
+    ce_vega_by_strike = {}
+    pe_vega_by_strike = {}
+
+    for _, row in df.iterrows():
+        strike = row['strike']
+        ce_iv_by_strike[strike] = row['ce_iv']
+        pe_iv_by_strike[strike] = row['pe_iv']
+        ce_oi_by_strike[strike] = row['ce_oi']
+        pe_oi_by_strike[strike] = row['pe_oi']
+        ce_delta_by_strike[strike] = row['ce_delta']
+        pe_delta_by_strike[strike] = row['pe_delta']
+        ce_gamma_by_strike[strike] = row['ce_gamma']
+        pe_gamma_by_strike[strike] = row['pe_gamma']
+        ce_theta_by_strike[strike] = row['ce_theta']
+        pe_theta_by_strike[strike] = row['pe_theta']
+        ce_vega_by_strike[strike] = row['ce_vega']
+        pe_vega_by_strike[strike] = row['pe_vega']
+
+    # Also store ATM-specific values for the message
     atm_ce_iv = df.loc[df['strike'] == atm_strike, 'ce_iv'].values[0]
     atm_pe_iv = df.loc[df['strike'] == atm_strike, 'pe_iv'].values[0]
 
+    # OTM averages (for message only)
     above_strikes, below_strikes = get_otm_strikes(df, atm_strike, step=100, count=2)
     otm_ce_ivs = [df.loc[df['strike'] == s, 'ce_iv'].values[0] for s in above_strikes]
     otm_pe_ivs = [df.loc[df['strike'] == s, 'pe_iv'].values[0] for s in above_strikes]
     otm_call_avg = sum(otm_ce_ivs)/len(otm_ce_ivs) if otm_ce_ivs else 0
     otm_put_avg = sum(otm_pe_ivs)/len(otm_pe_ivs) if otm_pe_ivs else 0
-
     below_ce_ivs = [df.loc[df['strike'] == s, 'ce_iv'].values[0] for s in below_strikes]
     below_pe_ivs = [df.loc[df['strike'] == s, 'pe_iv'].values[0] for s in below_strikes]
     otm_below_call_avg = sum(below_ce_ivs)/len(below_ce_ivs) if below_ce_ivs else 0
@@ -152,16 +183,19 @@ def check_directional_signal(df, spot_price, symbol):
         'otm_put_avg': round(otm_put_avg, 2),
         'otm_below_call_avg': round(otm_below_call_avg, 2),
         'otm_below_put_avg': round(otm_below_put_avg, 2),
-        'ce_oi': df.loc[df['strike'] == atm_strike, 'ce_oi'].values[0],
-        'pe_oi': df.loc[df['strike'] == atm_strike, 'pe_oi'].values[0],
-        'ce_delta': df.loc[df['strike'] == atm_strike, 'ce_delta'].values[0],
-        'pe_delta': df.loc[df['strike'] == atm_strike, 'pe_delta'].values[0],
-        'ce_gamma': df.loc[df['strike'] == atm_strike, 'ce_gamma'].values[0],
-        'pe_gamma': df.loc[df['strike'] == atm_strike, 'pe_gamma'].values[0],
-        'ce_theta': df.loc[df['strike'] == atm_strike, 'ce_theta'].values[0],
-        'pe_theta': df.loc[df['strike'] == atm_strike, 'pe_theta'].values[0],
-        'ce_vega': df.loc[df['strike'] == atm_strike, 'ce_vega'].values[0],
-        'pe_vega': df.loc[df['strike'] == atm_strike, 'pe_vega'].values[0],
+        # Per-strike dictionaries (for same-strike comparison)
+        'ce_iv_by_strike': ce_iv_by_strike,
+        'pe_iv_by_strike': pe_iv_by_strike,
+        'ce_oi_by_strike': ce_oi_by_strike,
+        'pe_oi_by_strike': pe_oi_by_strike,
+        'ce_delta_by_strike': ce_delta_by_strike,
+        'pe_delta_by_strike': pe_delta_by_strike,
+        'ce_gamma_by_strike': ce_gamma_by_strike,
+        'pe_gamma_by_strike': pe_gamma_by_strike,
+        'ce_theta_by_strike': ce_theta_by_strike,
+        'pe_theta_by_strike': pe_theta_by_strike,
+        'ce_vega_by_strike': ce_vega_by_strike,
+        'pe_vega_by_strike': pe_vega_by_strike,
     }
 
     # Load existing state
@@ -169,7 +203,6 @@ def check_directional_signal(df, spot_price, symbol):
     history = state.get('history', [])
     last_alert_time = state.get('last_alert_time', None)
 
-    # Add current snapshot to history
     history.append(current_snapshot)
     if len(history) > MAX_HISTORY:
         history = history[-MAX_HISTORY:]
@@ -179,7 +212,7 @@ def check_directional_signal(df, spot_price, symbol):
         print("✅ Initial state saved. Need one more snapshot for comparison.")
         return
 
-    # Cooldown check
+    # Cooldown
     if last_alert_time:
         last_alert_dt = datetime.fromisoformat(last_alert_time)
         if (datetime.now() - last_alert_dt) < timedelta(minutes=ALERT_COOLDOWN_MINUTES):
@@ -192,19 +225,36 @@ def check_directional_signal(df, spot_price, symbol):
     bullish_details = {}
     bearish_details = {}
 
-    print("\n🔍 DEBUG – Percentage changes for each timeframe:")
+    print("\n🔍 DEBUG – Percentage changes for SAME strike across time:")
     for label, idx in timeframes.items():
         if len(history) < abs(idx) + 1:
             print(f"  {label}: Not enough history (need {abs(idx)+1}, have {len(history)})")
             continue
 
-        prev = history[idx]
-        curr = history[-1]
+        prev_snapshot = history[idx]
+        curr_snapshot = history[-1]
 
-        pct_delta_atm_ce = calculate_percentage_change(curr['atm_ce_iv'], prev['atm_ce_iv'])
-        pct_delta_atm_pe = calculate_percentage_change(curr['atm_pe_iv'], prev['atm_pe_iv'])
-        pct_delta_otm_call = calculate_percentage_change(curr['otm_call_avg'], prev['otm_call_avg'])
-        pct_delta_otm_below_put = calculate_percentage_change(curr['otm_below_put_avg'], prev['otm_below_put_avg'])
+        # Get IVs for the same strike (current ATM strike)
+        curr_ce_iv = curr_snapshot['ce_iv_by_strike'].get(atm_strike)
+        prev_ce_iv = prev_snapshot['ce_iv_by_strike'].get(atm_strike)
+        curr_pe_iv = curr_snapshot['pe_iv_by_strike'].get(atm_strike)
+        prev_pe_iv = prev_snapshot['pe_iv_by_strike'].get(atm_strike)
+
+        # If the strike was not available in the historical snapshot, skip this timeframe
+        if curr_ce_iv is None or prev_ce_iv is None or curr_pe_iv is None or prev_pe_iv is None:
+            print(f"  {label}: Strike {atm_strike} not found in history – skipping")
+            continue
+
+        # For OTM averages, we still use the snapshot's stored averages (they are strike‑specific)
+        curr_otm_call_avg = curr_snapshot['otm_call_avg']
+        prev_otm_call_avg = prev_snapshot['otm_call_avg']
+        curr_otm_below_put_avg = curr_snapshot['otm_below_put_avg']
+        prev_otm_below_put_avg = prev_snapshot['otm_below_put_avg']
+
+        pct_delta_atm_ce = calculate_percentage_change(curr_ce_iv, prev_ce_iv)
+        pct_delta_atm_pe = calculate_percentage_change(curr_pe_iv, prev_pe_iv)
+        pct_delta_otm_call = calculate_percentage_change(curr_otm_call_avg, prev_otm_call_avg)
+        pct_delta_otm_below_put = calculate_percentage_change(curr_otm_below_put_avg, prev_otm_below_put_avg)
 
         print(f"  {label}: ATM CE {pct_delta_atm_ce:+.2f}% | ATM PE {pct_delta_atm_pe:+.2f}% | "
               f"OTM Call {pct_delta_otm_call:+.2f}% | OTM Put {pct_delta_otm_below_put:+.2f}%")
@@ -218,10 +268,10 @@ def check_directional_signal(df, spot_price, symbol):
         if is_bullish:
             bullish_timeframes.append(label)
             bullish_details[label] = {
-                'atm_ce_iv': (prev['atm_ce_iv'], curr['atm_ce_iv'], pct_delta_atm_ce),
-                'atm_pe_iv': (prev['atm_pe_iv'], curr['atm_pe_iv'], pct_delta_atm_pe),
-                'otm_call_avg': (prev['otm_call_avg'], curr['otm_call_avg'], pct_delta_otm_call),
-                'otm_below_put_avg': (prev['otm_below_put_avg'], curr['otm_below_put_avg'], pct_delta_otm_below_put),
+                'atm_ce_iv': (prev_ce_iv, curr_ce_iv, pct_delta_atm_ce),
+                'atm_pe_iv': (prev_pe_iv, curr_pe_iv, pct_delta_atm_pe),
+                'otm_call_avg': (prev_otm_call_avg, curr_otm_call_avg, pct_delta_otm_call),
+                'otm_below_put_avg': (prev_otm_below_put_avg, curr_otm_below_put_avg, pct_delta_otm_below_put),
             }
 
         is_bearish = (
@@ -233,28 +283,27 @@ def check_directional_signal(df, spot_price, symbol):
         if is_bearish:
             bearish_timeframes.append(label)
             bearish_details[label] = {
-                'atm_pe_iv': (prev['atm_pe_iv'], curr['atm_pe_iv'], pct_delta_atm_pe),
-                'atm_ce_iv': (prev['atm_ce_iv'], curr['atm_ce_iv'], pct_delta_atm_ce),
-                'otm_below_put_avg': (prev['otm_below_put_avg'], curr['otm_below_put_avg'], pct_delta_otm_below_put),
-                'otm_call_avg': (prev['otm_call_avg'], curr['otm_call_avg'], pct_delta_otm_call),
+                'atm_pe_iv': (prev_pe_iv, curr_pe_iv, pct_delta_atm_pe),
+                'atm_ce_iv': (prev_ce_iv, curr_ce_iv, pct_delta_atm_ce),
+                'otm_below_put_avg': (prev_otm_below_put_avg, curr_otm_below_put_avg, pct_delta_otm_below_put),
+                'otm_call_avg': (prev_otm_call_avg, curr_otm_call_avg, pct_delta_otm_call),
             }
 
     print(f"\n📊 Summary: Bullish timeframes = {bullish_timeframes}, Bearish timeframes = {bearish_timeframes}")
 
-    # --- If any timeframe triggered (bullish or bearish), send alert with Smart Money context ---
+    # --- Send alert if any timeframe triggered ---
     if bullish_timeframes or bearish_timeframes:
-        # Calculate Smart Money Score using current and previous snapshot (5 min ago)
-        prev_snapshot = history[-2]  # previous snapshot (5 min ago)
+        # Smart Money Score (uses previous snapshot, same strike)
+        prev_snapshot = history[-2]  # 5-min ago
         call_score, put_score, interp = calculate_smart_money_score(df, atm_strike, prev_snapshot)
 
-        # Build message based on the type of signal
         if bullish_timeframes and not bearish_timeframes:
             msg = f"🟢 *BULLISH Signal* ({symbol} Spot: {spot_price:.2f})\n\n"
             msg += f"✅ Triggered at: {', '.join(bullish_timeframes)}\n"
             non_bullish = [t for t in timeframes.keys() if t not in bullish_timeframes]
             if non_bullish:
                 msg += f"⏳ Not confirmed at: {', '.join(non_bullish)}\n\n"
-            msg += "*% Changes:*\n"
+            msg += "*% Changes (same strike):*\n"
             for label in bullish_timeframes:
                 d = bullish_details[label]
                 msg += f"  *{label}*: ATM Call {d['atm_ce_iv'][0]:.2f}→{d['atm_ce_iv'][1]:.2f} ({d['atm_ce_iv'][2]:+.1f}%) | "
@@ -268,7 +317,7 @@ def check_directional_signal(df, spot_price, symbol):
             non_bearish = [t for t in timeframes.keys() if t not in bearish_timeframes]
             if non_bearish:
                 msg += f"⏳ Not confirmed at: {', '.join(non_bearish)}\n\n"
-            msg += "*% Changes:*\n"
+            msg += "*% Changes (same strike):*\n"
             for label in bearish_timeframes:
                 d = bearish_details[label]
                 msg += f"  *{label}*: ATM Put {d['atm_pe_iv'][0]:.2f}→{d['atm_pe_iv'][1]:.2f} ({d['atm_pe_iv'][2]:+.1f}%) | "
@@ -277,11 +326,10 @@ def check_directional_signal(df, spot_price, symbol):
                 msg += f"OTM Call {d['otm_call_avg'][0]:.2f}→{d['otm_call_avg'][1]:.2f} ({d['otm_call_avg'][2]:+.1f}%)\n"
 
         else:
-            # Mixed (both bullish and bearish timeframes exist)
             msg = f"⚠️ *MIXED TIMEFRAME SIGNAL* ({symbol} Spot: {spot_price:.2f})\n\n"
             msg += f"🟢 Bullish at: {', '.join(bullish_timeframes)}\n"
             msg += f"🔴 Bearish at: {', '.join(bearish_timeframes)}\n\n"
-            msg += "*Changes:*\n"
+            msg += "*Changes (same strike):*\n"
             for label in bullish_timeframes:
                 d = bullish_details[label]
                 msg += f"  🟢 {label} - ATM Call Δ{d['atm_ce_iv'][2]:+.1f}% | ATM Put Δ{d['atm_pe_iv'][2]:+.1f}%\n"
@@ -289,15 +337,12 @@ def check_directional_signal(df, spot_price, symbol):
                 d = bearish_details[label]
                 msg += f"  🔴 {label} - ATM Put Δ{d['atm_pe_iv'][2]:+.1f}% | ATM Call Δ{d['atm_ce_iv'][2]:+.1f}%\n"
 
-        # --- Always include Smart Money Score (context only) ---
         msg += f"\n🧠 *Smart Money Context:*\n"
         msg += f"   Call Score: {call_score}/6  {'🟢' if call_score >= 4 else '⚪'}\n"
         msg += f"   Put Score:  {put_score}/6  {'🔴' if put_score >= 4 else '⚪'}\n"
         msg += f"   → {interp}"
 
-        # Send alert
         send_telegram(msg)
-        # Update last alert time in state
         state['last_alert_time'] = datetime.now().isoformat()
         save_state(symbol, state)
     else:
