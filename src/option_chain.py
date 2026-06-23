@@ -2,59 +2,57 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta
 import calendar
-from config import UPSTOX_API_BASE, HEADERS
-from src.nse_holidays import get_adjusted_expiry
+from config import UPSTOX_API_BASE, HEADERS, INSTRUMENTS
+
+# ----- Expiry fetching from Upstox API -----
+def get_available_expiries(instrument_key):
+    """Fetch list of available expiry dates for an instrument from Upstox."""
+    url = f"{UPSTOX_API_BASE}/option/expiry"
+    params = {"instrument_key": instrument_key}
+    try:
+        resp = requests.get(url, headers=HEADERS, params=params, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            expiries = data.get('data', [])
+            if expiries:
+                return sorted(expiries)  # nearest first
+            else:
+                print(f"⚠️ No expiries returned for {instrument_key}")
+        else:
+            print(f"⚠️ Expiry API error {resp.status_code}: {resp.text[:100]}")
+    except Exception as e:
+        print(f"⚠️ Expiry API exception: {e}")
+    return None
 
 def get_next_tuesday_expiry():
-    """Return next Tuesday for NIFTY (weekly)."""
+    """Fallback: calculate next Tuesday (no holiday adjustment)."""
     today = datetime.today()
     days_ahead = (1 - today.weekday()) % 7
     if days_ahead == 0:
         days_ahead = 7
     next_tue = today + timedelta(days=days_ahead)
-    return get_adjusted_expiry(next_tue.strftime("%Y-%m-%d"))
-
-def get_last_tuesday_of_month(year, month):
-    """Return the last Tuesday of a given month."""
-    last_day = calendar.monthrange(year, month)[1]
-    last_date = datetime(year, month, last_day)
-    days_back = (last_date.weekday() - 1) % 7
-    last_tuesday = last_date - timedelta(days=days_back)
-    return last_tuesday
+    return next_tue.strftime("%Y-%m-%d")
 
 def get_expiry_date(symbol):
     """
-    Return expiry date (YYYY-MM-DD) based on instrument:
-    - NIFTY: next Tuesday (weekly) with holiday adjustment
-    - BANKNIFTY: last Tuesday of current month (monthly) with holiday adjustment
+    Return the nearest available expiry for the symbol.
+    Uses Upstox expiry API, fallback to next Tuesday if fails.
     """
-    today = datetime.today()
-    
-    if symbol == "NIFTY":
+    instrument_key = INSTRUMENTS.get(symbol)
+    if not instrument_key:
         return get_next_tuesday_expiry()
     
-    elif symbol == "BANKNIFTY":
-        year = today.year
-        month = today.month
-        last_tue = get_last_tuesday_of_month(year, month)
-        if last_tue.date() < today.date():
-            if month == 12:
-                year += 1
-                month = 1
-            else:
-                month += 1
-            last_tue = get_last_tuesday_of_month(year, month)
-        expiry = last_tue.strftime("%Y-%m-%d")
-        return get_adjusted_expiry(expiry)
-    
+    expiries = get_available_expiries(instrument_key)
+    if expiries:
+        nearest = expiries[0]
+        print(f"📅 Nearest expiry for {symbol}: {nearest}")
+        return nearest
     else:
+        print(f"⚠️ Falling back to Tuesday calculation for {symbol}")
         return get_next_tuesday_expiry()
 
+# ----- Fetch option chain (unchanged) -----
 def fetch_option_chain(instrument_key, expiry_date, retries=3, timeout=60):
-    """
-    Fetch option chain with retry logic.
-    instrument_key is already correct: NSE_INDEX|Nifty Bank for BANKNIFTY
-    """
     url = f"{UPSTOX_API_BASE}/option/chain"
     params = {
         "instrument_key": instrument_key,
