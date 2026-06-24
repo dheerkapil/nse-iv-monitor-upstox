@@ -72,13 +72,7 @@ def calculate_percentage_change(current, previous):
     return ((current - previous) / previous) * 100
 
 def calculate_smart_money_score(df, atm_strike, prev_data):
-    """
-    Simplified Smart Money Score using OI, IV, Delta, Gamma, Theta, Vega.
-    Uses previous snapshot's values for the SAME strike.
-    """
     row = df[df['strike'] == atm_strike].iloc[0]
-
-    # Get previous values for this same strike (if available)
     prev_ce_oi = prev_data.get('ce_oi_by_strike', {}).get(atm_strike, row['ce_oi'])
     prev_pe_oi = prev_data.get('pe_oi_by_strike', {}).get(atm_strike, row['pe_oi'])
     prev_ce_iv = prev_data.get('ce_iv_by_strike', {}).get(atm_strike, row['ce_iv'])
@@ -92,7 +86,6 @@ def calculate_smart_money_score(df, atm_strike, prev_data):
     prev_ce_vega = prev_data.get('ce_vega_by_strike', {}).get(atm_strike, row['ce_vega'])
     prev_pe_vega = prev_data.get('pe_vega_by_strike', {}).get(atm_strike, row['pe_vega'])
 
-    # --- Call Side ---
     call_score = 0
     if row['ce_oi'] > prev_ce_oi: call_score += 1
     if row['ce_iv'] > prev_ce_iv: call_score += 1
@@ -101,7 +94,6 @@ def calculate_smart_money_score(df, atm_strike, prev_data):
     if row['ce_theta'] < prev_ce_theta: call_score += 1
     if row['ce_vega'] < prev_ce_vega: call_score += 1
 
-    # --- Put Side ---
     put_score = 0
     if row['pe_oi'] > prev_pe_oi: put_score += 1
     if row['pe_iv'] > prev_pe_iv: put_score += 1
@@ -110,7 +102,6 @@ def calculate_smart_money_score(df, atm_strike, prev_data):
     if row['pe_theta'] < prev_pe_theta: put_score += 1
     if row['pe_vega'] < prev_pe_vega: put_score += 1
 
-    # Interpretation (context only)
     if call_score >= 4 and put_score <= 2:
         interp = "🟢 STRONG BULLISH (Smart money buying calls)"
     elif put_score >= 4 and call_score <= 2:
@@ -119,17 +110,15 @@ def calculate_smart_money_score(df, atm_strike, prev_data):
         interp = "🟡 HEDGING (Smart money hedging both sides)"
     else:
         interp = "⚪ LOW CONVICTION (No clear smart money direction)"
-
     return call_score, put_score, interp
 
-def check_directional_signal(df, spot_price, symbol):
+def check_directional_signal(df, spot_price, symbol, expiry):
     if symbol not in ["NIFTY", "BANKNIFTY"]:
         return
 
-    # --- Build current snapshot with per-strike IV and Greeks ---
     atm_strike = get_atm_strike(df, spot_price)
 
-    # Build dictionaries for per-strike values (for all strikes in the chain)
+    # Build per-strike dictionaries
     ce_iv_by_strike = {}
     pe_iv_by_strike = {}
     ce_oi_by_strike = {}
@@ -158,11 +147,10 @@ def check_directional_signal(df, spot_price, symbol):
         ce_vega_by_strike[strike] = row['ce_vega']
         pe_vega_by_strike[strike] = row['pe_vega']
 
-    # Also store ATM-specific values for the message
     atm_ce_iv = df.loc[df['strike'] == atm_strike, 'ce_iv'].values[0]
     atm_pe_iv = df.loc[df['strike'] == atm_strike, 'pe_iv'].values[0]
 
-    # OTM averages (for message only)
+    # OTM averages for message
     above_strikes, below_strikes = get_otm_strikes(df, atm_strike, step=100, count=2)
     otm_ce_ivs = [df.loc[df['strike'] == s, 'ce_iv'].values[0] for s in above_strikes]
     otm_pe_ivs = [df.loc[df['strike'] == s, 'pe_iv'].values[0] for s in above_strikes]
@@ -175,6 +163,7 @@ def check_directional_signal(df, spot_price, symbol):
 
     current_snapshot = {
         'timestamp': datetime.now().isoformat(),
+        'expiry': expiry,  # <-- store expiry
         'spot': spot_price,
         'atm_strike': atm_strike,
         'atm_ce_iv': round(atm_ce_iv, 2),
@@ -183,7 +172,6 @@ def check_directional_signal(df, spot_price, symbol):
         'otm_put_avg': round(otm_put_avg, 2),
         'otm_below_call_avg': round(otm_below_call_avg, 2),
         'otm_below_put_avg': round(otm_below_put_avg, 2),
-        # Per-strike dictionaries (for same-strike comparison)
         'ce_iv_by_strike': ce_iv_by_strike,
         'pe_iv_by_strike': pe_iv_by_strike,
         'ce_oi_by_strike': ce_oi_by_strike,
@@ -198,10 +186,14 @@ def check_directional_signal(df, spot_price, symbol):
         'pe_vega_by_strike': pe_vega_by_strike,
     }
 
-    # Load existing state
     state = load_state(symbol)
     history = state.get('history', [])
     last_alert_time = state.get('last_alert_time', None)
+
+    # If history exists but expiry changed → clear it
+    if history and history[-1].get('expiry') != expiry:
+        print(f"📅 Expiry changed from {history[-1].get('expiry')} to {expiry}. Clearing history.")
+        history = []
 
     history.append(current_snapshot)
     if len(history) > MAX_HISTORY:
@@ -234,23 +226,20 @@ def check_directional_signal(df, spot_price, symbol):
         prev_snapshot = history[idx]
         curr_snapshot = history[-1]
 
-        # --- Check if both snapshots have per-strike dictionaries ---
+        # Ensure both snapshots have per-strike data
         if ('ce_iv_by_strike' not in prev_snapshot or 'ce_iv_by_strike' not in curr_snapshot):
             print(f"  {label}: Snapshot format mismatch (missing per-strike data) – skipping. Cache will rebuild.")
             continue
 
-        # Get IVs for the same strike (current ATM strike)
         curr_ce_iv = curr_snapshot['ce_iv_by_strike'].get(atm_strike)
         prev_ce_iv = prev_snapshot['ce_iv_by_strike'].get(atm_strike)
         curr_pe_iv = curr_snapshot['pe_iv_by_strike'].get(atm_strike)
         prev_pe_iv = prev_snapshot['pe_iv_by_strike'].get(atm_strike)
 
-        # If the strike was not available in the historical snapshot, skip this timeframe
         if curr_ce_iv is None or prev_ce_iv is None or curr_pe_iv is None or prev_pe_iv is None:
             print(f"  {label}: Strike {atm_strike} not found in history – skipping")
             continue
 
-        # For OTM averages, we still use the snapshot's stored averages (they are strike‑specific)
         curr_otm_call_avg = curr_snapshot['otm_call_avg']
         prev_otm_call_avg = prev_snapshot['otm_call_avg']
         curr_otm_below_put_avg = curr_snapshot['otm_below_put_avg']
@@ -296,11 +285,8 @@ def check_directional_signal(df, spot_price, symbol):
 
     print(f"\n📊 Summary: Bullish timeframes = {bullish_timeframes}, Bearish timeframes = {bearish_timeframes}")
 
-    # --- Send alert if any timeframe triggered ---
     if bullish_timeframes or bearish_timeframes:
-        # Smart Money Score (uses previous snapshot, same strike)
-        prev_snapshot = history[-2]  # 5-min ago
-        # But only if it has the new keys
+        prev_snapshot = history[-2]
         if 'ce_iv_by_strike' in prev_snapshot:
             call_score, put_score, interp = calculate_smart_money_score(df, atm_strike, prev_snapshot)
         else:
