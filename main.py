@@ -38,7 +38,7 @@ def main():
             spot_num = clean_spot_price(spot)
             if spot_num is not None:
                 print(f"✅ Cleaned spot price: {spot_num}")
-                check_directional_signal(df, spot_num, symbol)
+                check_directional_signal(df, spot_num, symbol, expiry)  # <-- pass expiry
             else:
                 print(f"⚠️ Could not parse spot price: '{spot}'")
 
