@@ -71,6 +71,19 @@ def calculate_percentage_change(current, previous):
         return 0.0
     return ((current - previous) / previous) * 100
 
+def get_closest_strike(strike_dict, target_strike, max_diff=100):
+    """
+    Find the closest strike to target_strike in a dictionary of strikes.
+    Returns the closest strike if within max_diff, else None.
+    """
+    if not strike_dict:
+        return None
+    strikes = list(strike_dict.keys())
+    closest = min(strikes, key=lambda x: abs(x - target_strike))
+    if abs(closest - target_strike) <= max_diff:
+        return closest
+    return None
+
 def calculate_smart_money_score(df, atm_strike, prev_data):
     row = df[df['strike'] == atm_strike].iloc[0]
     prev_ce_oi = prev_data.get('ce_oi_by_strike', {}).get(atm_strike, row['ce_oi'])
@@ -163,7 +176,7 @@ def check_directional_signal(df, spot_price, symbol, expiry):
 
     current_snapshot = {
         'timestamp': datetime.now().isoformat(),
-        'expiry': expiry,  # <-- store expiry
+        'expiry': expiry,
         'spot': spot_price,
         'atm_strike': atm_strike,
         'atm_ce_iv': round(atm_ce_iv, 2),
@@ -217,7 +230,7 @@ def check_directional_signal(df, spot_price, symbol, expiry):
     bullish_details = {}
     bearish_details = {}
 
-    print("\n🔍 DEBUG – Percentage changes for SAME strike across time:")
+    print("\n🔍 DEBUG – Percentage changes for SAME strike across time (fallback to nearest if missing):")
     for label, idx in timeframes.items():
         if len(history) < abs(idx) + 1:
             print(f"  {label}: Not enough history (need {abs(idx)+1}, have {len(history)})")
@@ -231,15 +244,26 @@ def check_directional_signal(df, spot_price, symbol, expiry):
             print(f"  {label}: Snapshot format mismatch (missing per-strike data) – skipping. Cache will rebuild.")
             continue
 
-        curr_ce_iv = curr_snapshot['ce_iv_by_strike'].get(atm_strike)
-        prev_ce_iv = prev_snapshot['ce_iv_by_strike'].get(atm_strike)
-        curr_pe_iv = curr_snapshot['pe_iv_by_strike'].get(atm_strike)
-        prev_pe_iv = prev_snapshot['pe_iv_by_strike'].get(atm_strike)
+        # Try exact strike first, then fallback to nearest within 100 points
+        prev_strike = atm_strike if atm_strike in prev_snapshot['ce_iv_by_strike'] else get_closest_strike(prev_snapshot['ce_iv_by_strike'], atm_strike, 100)
+        curr_strike = atm_strike if atm_strike in curr_snapshot['ce_iv_by_strike'] else get_closest_strike(curr_snapshot['ce_iv_by_strike'], atm_strike, 100)
 
-        if curr_ce_iv is None or prev_ce_iv is None or curr_pe_iv is None or prev_pe_iv is None:
-            print(f"  {label}: Strike {atm_strike} not found in history – skipping")
+        if prev_strike is None or curr_strike is None:
+            print(f"  {label}: No strike within 100 points of {atm_strike} in history/current – skipping")
             continue
 
+        # Get IVs for the found strikes
+        curr_ce_iv = curr_snapshot['ce_iv_by_strike'].get(curr_strike)
+        prev_ce_iv = prev_snapshot['ce_iv_by_strike'].get(prev_strike)
+        curr_pe_iv = curr_snapshot['pe_iv_by_strike'].get(curr_strike)
+        prev_pe_iv = prev_snapshot['pe_iv_by_strike'].get(prev_strike)
+
+        # If still None, skip
+        if curr_ce_iv is None or prev_ce_iv is None or curr_pe_iv is None or prev_pe_iv is None:
+            print(f"  {label}: IV data missing for found strikes – skipping")
+            continue
+
+        # For OTM averages, we use the snapshot's stored averages
         curr_otm_call_avg = curr_snapshot['otm_call_avg']
         prev_otm_call_avg = prev_snapshot['otm_call_avg']
         curr_otm_below_put_avg = curr_snapshot['otm_below_put_avg']
@@ -298,7 +322,7 @@ def check_directional_signal(df, spot_price, symbol, expiry):
             non_bullish = [t for t in timeframes.keys() if t not in bullish_timeframes]
             if non_bullish:
                 msg += f"⏳ Not confirmed at: {', '.join(non_bullish)}\n\n"
-            msg += "*% Changes (same strike):*\n"
+            msg += "*% Changes (same strike, fallback to nearest if needed):*\n"
             for label in bullish_timeframes:
                 d = bullish_details[label]
                 msg += f"  *{label}*: ATM Call {d['atm_ce_iv'][0]:.2f}→{d['atm_ce_iv'][1]:.2f} ({d['atm_ce_iv'][2]:+.1f}%) | "
@@ -312,7 +336,7 @@ def check_directional_signal(df, spot_price, symbol, expiry):
             non_bearish = [t for t in timeframes.keys() if t not in bearish_timeframes]
             if non_bearish:
                 msg += f"⏳ Not confirmed at: {', '.join(non_bearish)}\n\n"
-            msg += "*% Changes (same strike):*\n"
+            msg += "*% Changes (same strike, fallback to nearest if needed):*\n"
             for label in bearish_timeframes:
                 d = bearish_details[label]
                 msg += f"  *{label}*: ATM Put {d['atm_pe_iv'][0]:.2f}→{d['atm_pe_iv'][1]:.2f} ({d['atm_pe_iv'][2]:+.1f}%) | "
@@ -324,7 +348,7 @@ def check_directional_signal(df, spot_price, symbol, expiry):
             msg = f"⚠️ *MIXED TIMEFRAME SIGNAL* ({symbol} Spot: {spot_price:.2f})\n\n"
             msg += f"🟢 Bullish at: {', '.join(bullish_timeframes)}\n"
             msg += f"🔴 Bearish at: {', '.join(bearish_timeframes)}\n\n"
-            msg += "*Changes (same strike):*\n"
+            msg += "*Changes (same strike, fallback to nearest if needed):*\n"
             for label in bullish_timeframes:
                 d = bullish_details[label]
                 msg += f"  🟢 {label} - ATM Call Δ{d['atm_ce_iv'][2]:+.1f}% | ATM Put Δ{d['atm_pe_iv'][2]:+.1f}%\n"
