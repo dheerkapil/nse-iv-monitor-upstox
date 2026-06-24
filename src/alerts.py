@@ -74,15 +74,15 @@ def calculate_percentage_change(current, previous):
 def get_closest_strike(strike_dict, target_strike, max_diff=100):
     """
     Find the closest strike to target_strike in a dictionary of strikes.
-    Returns the closest strike (as float) if within max_diff, else None.
+    Returns the original key (preserving type) if within max_diff, else None.
     """
     if not strike_dict:
         return None
-    # Convert keys to float for comparison
-    strikes = [float(k) for k in strike_dict.keys()]
-    closest = min(strikes, key=lambda x: abs(x - target_strike))
-    if abs(closest - target_strike) <= max_diff:
-        return closest
+    keys = list(strike_dict.keys())
+    # Find closest using numeric comparison
+    closest_key = min(keys, key=lambda k: abs(float(k) - target_strike))
+    if abs(float(closest_key) - target_strike) <= max_diff:
+        return closest_key  # return the actual key (string or float)
     return None
 
 def calculate_smart_money_score(df, atm_strike, prev_data):
@@ -245,21 +245,21 @@ def check_directional_signal(df, spot_price, symbol, expiry):
             print(f"  {label}: Snapshot format mismatch (missing per-strike data) – skipping. Cache will rebuild.")
             continue
 
-        # Try exact strike first, then fallback to nearest within 100 points
-        prev_strike = atm_strike if atm_strike in prev_snapshot['ce_iv_by_strike'] else get_closest_strike(prev_snapshot['ce_iv_by_strike'], atm_strike, 100)
-        curr_strike = atm_strike if atm_strike in curr_snapshot['ce_iv_by_strike'] else get_closest_strike(curr_snapshot['ce_iv_by_strike'], atm_strike, 100)
+        # Find closest strike in both snapshots (returns the actual key)
+        prev_strike = get_closest_strike(prev_snapshot['ce_iv_by_strike'], atm_strike, 100)
+        curr_strike = get_closest_strike(curr_snapshot['ce_iv_by_strike'], atm_strike, 100)
 
         if prev_strike is None or curr_strike is None:
             print(f"  {label}: No strike within 100 points of {atm_strike} in history/current – skipping")
             continue
 
-        # Get IVs for the found strikes
+        # Now retrieve IVs using the exact keys returned
         curr_ce_iv = curr_snapshot['ce_iv_by_strike'].get(curr_strike)
         prev_ce_iv = prev_snapshot['ce_iv_by_strike'].get(prev_strike)
         curr_pe_iv = curr_snapshot['pe_iv_by_strike'].get(curr_strike)
         prev_pe_iv = prev_snapshot['pe_iv_by_strike'].get(prev_strike)
 
-        # If still None, skip
+        # If any IV is None (key missing) or zero? We'll treat zero as valid but check for None.
         if curr_ce_iv is None or prev_ce_iv is None or curr_pe_iv is None or prev_pe_iv is None:
             print(f"  {label}: IV data missing for found strikes – skipping")
             continue
