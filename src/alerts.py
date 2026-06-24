@@ -74,11 +74,12 @@ def calculate_percentage_change(current, previous):
 def get_closest_strike(strike_dict, target_strike, max_diff=100):
     """
     Find the closest strike to target_strike in a dictionary of strikes.
-    Returns the closest strike if within max_diff, else None.
+    Returns the closest strike (as float) if within max_diff, else None.
     """
     if not strike_dict:
         return None
-    strikes = list(strike_dict.keys())
+    # Convert keys to float for comparison
+    strikes = [float(k) for k in strike_dict.keys()]
     closest = min(strikes, key=lambda x: abs(x - target_strike))
     if abs(closest - target_strike) <= max_diff:
         return closest
