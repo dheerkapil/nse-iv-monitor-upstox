@@ -59,12 +59,13 @@ def get_atm_strike(df, spot_price, symbol):
 
 def get_otm_strikes(df, atm_strike, step=100, count=2):
     available_strikes = sorted(df['strike'].unique())
-    above, below = [], []
-    for i in range(1, count + 1):
-        target_up = atm_strike + i * step
+    above = []
+    below = []
+    for i in range(1, count+1):
+        target_up = atm_strike + i*step
         up_candidate = min(available_strikes, key=lambda x: abs(x - target_up))
         above.append(up_candidate)
-        target_down = atm_strike - i * step
+        target_down = atm_strike - i*step
         down_candidate = min(available_strikes, key=lambda x: abs(x - target_down))
         below.append(down_candidate)
     return above, below
@@ -137,10 +138,14 @@ def calculate_smart_money_score(df, atm_strike, prev_data):
     return call_score, put_score, interp
 
 def check_directional_signal(df, spot_price, symbol, expiry):
+    print("🔍 ENTERED check_directional_signal...")   # <-- This must appear in logs
+
     if symbol not in ["NIFTY", "BANKNIFTY"]:
+        print(f"⚠️ Symbol {symbol} not supported, returning.")
         return
 
     atm_strike = get_atm_strike(df, spot_price, symbol)
+    print(f"🎯 ATM strike used: {atm_strike}")
 
     # Build per-strike dictionaries
     ce_iv_by_strike = {}
@@ -238,20 +243,25 @@ def check_directional_signal(df, spot_price, symbol, expiry):
     bullish_details = {}
     bearish_details = {}
 
+    print("\n🔍 DEBUG – Percentage changes for SAME strike across time (fallback to nearest if missing):")
     for label, idx in timeframes.items():
+        print(f"  Checking {label} (idx={idx})")
         if len(history) < abs(idx) + 1:
+            print(f"    Not enough history (need {abs(idx)+1}, have {len(history)})")
             continue
 
         prev_snapshot = history[idx]
         curr_snapshot = history[-1]
 
         if 'ce_iv_by_strike' not in prev_snapshot or 'ce_iv_by_strike' not in curr_snapshot:
+            print(f"    Snapshot format mismatch – skipping.")
             continue
 
         prev_strike = get_closest_strike(prev_snapshot['ce_iv_by_strike'], atm_strike, 100)
         curr_strike = get_closest_strike(curr_snapshot['ce_iv_by_strike'], atm_strike, 100)
 
         if prev_strike is None or curr_strike is None:
+            print(f"    No strike within 100 points of {atm_strike} in history/current – skipping")
             continue
 
         curr_ce_iv = curr_snapshot['ce_iv_by_strike'].get(curr_strike)
@@ -260,12 +270,16 @@ def check_directional_signal(df, spot_price, symbol, expiry):
         prev_pe_iv = prev_snapshot['pe_iv_by_strike'].get(prev_strike)
 
         if curr_ce_iv is None or prev_ce_iv is None or curr_pe_iv is None or prev_pe_iv is None:
+            print(f"    IV data missing for found strikes – skipping")
             continue
 
         pct_delta_atm_ce = calculate_percentage_change(curr_ce_iv, prev_ce_iv)
         pct_delta_atm_pe = calculate_percentage_change(curr_pe_iv, prev_pe_iv)
         pct_delta_otm_call = calculate_percentage_change(curr_snapshot['otm_call_avg'], prev_snapshot['otm_call_avg'])
         pct_delta_otm_below_put = calculate_percentage_change(curr_snapshot['otm_below_put_avg'], prev_snapshot['otm_below_put_avg'])
+
+        print(f"    {label}: ATM CE {pct_delta_atm_ce:+.2f}% | ATM PE {pct_delta_atm_pe:+.2f}% | "
+              f"OTM Call {pct_delta_otm_call:+.2f}% | OTM Put {pct_delta_otm_below_put:+.2f}%")
 
         if (pct_delta_atm_ce > BULLISH_CALL_RISE_PCT and
             pct_delta_atm_pe < BULLISH_PUT_FALL_PCT and
@@ -290,6 +304,8 @@ def check_directional_signal(df, spot_price, symbol, expiry):
                 'otm_below_put_avg': (prev_snapshot['otm_below_put_avg'], curr_snapshot['otm_below_put_avg'], pct_delta_otm_below_put),
                 'otm_call_avg': (prev_snapshot['otm_call_avg'], curr_snapshot['otm_call_avg'], pct_delta_otm_call),
             }
+
+    print(f"\n📊 Summary: Bullish timeframes = {bullish_timeframes}, Bearish timeframes = {bearish_timeframes}")
 
     if bullish_timeframes or bearish_timeframes:
         prev_snapshot = history[-2]
