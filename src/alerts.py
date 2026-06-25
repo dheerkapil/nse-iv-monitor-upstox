@@ -7,7 +7,7 @@ from config import (
     BULLISH_OTM_CALL_RISE_PCT, BULLISH_OTM_PUT_FALL_PCT,
     BEARISH_PUT_RISE_PCT, BEARISH_CALL_FALL_PCT,
     BEARISH_OTM_PUT_RISE_PCT, BEARISH_OTM_CALL_FALL_PCT,
-    ALERT_COOLDOWN_MINUTES  # <-- imported from config
+    ALERT_COOLDOWN_MINUTES
 )
 
 CACHE_FILE = 'iv_state.json'
@@ -311,7 +311,10 @@ def check_directional_signal(df, spot_price, symbol, expiry):
 
     print(f"\n📊 Summary: Bullish timeframes = {bullish_timeframes}, Bearish timeframes = {bearish_timeframes}")
 
+    # --- DEBUG: Check if entering alert sending block ---
+    print("🔔 DEBUG: Entering alert sending block check...")
     if bullish_timeframes or bearish_timeframes:
+        print("✅ Alert conditions met – preparing message...")
         prev_snapshot = history[-2]
         if 'ce_iv_by_strike' in prev_snapshot:
             call_score, put_score, interp = calculate_smart_money_score(df, atm_strike, prev_snapshot)
@@ -363,8 +366,10 @@ def check_directional_signal(df, spot_price, symbol, expiry):
         msg += f"   Put Score:  {put_score}/6  {'🔴' if put_score >= 4 else '⚪'}\n"
         msg += f"   → {interp}"
 
+        print("📤 Sending Telegram message...")
         send_telegram(msg)
         state['last_alert_time'] = datetime.now().isoformat()
         save_state(symbol, state)
+        print("✅ Alert sent and state updated.")
     else:
         print("✅ No directional signal triggered at any timeframe.")
