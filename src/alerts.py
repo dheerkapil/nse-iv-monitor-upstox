@@ -11,7 +11,7 @@ from config import (
 
 CACHE_FILE = 'iv_state.json'
 MAX_HISTORY = 5
-ALERT_COOLDOWN_MINUTES = 30   # Will move to config later
+ALERT_COOLDOWN_MINUTES = 2   # Will move to config later
 
 def send_telegram(message):
     bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
