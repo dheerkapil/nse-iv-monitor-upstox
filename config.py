@@ -20,14 +20,14 @@ TRACK_INDICES = ["NIFTY", "BANKNIFTY"]
 # ========== ALERT THRESHOLDS (Percentage-Based) ==========
 # Bullish signals (percentage change relative to previous value)
 BULLISH_CALL_RISE_PCT = 3.0      # ATM Call IV must increase by more than 3.0%
-BULLISH_PUT_FALL_PCT = -1.0      # ATM Put IV must decrease by more than 1.5%
-BULLISH_OTM_CALL_RISE_PCT = 3.0  # OTM Call average IV must increase by more than 3.0%
+BULLISH_PUT_FALL_PCT = -1.5      # ATM Put IV must decrease by more than 1.5%
+BULLISH_OTM_CALL_RISE_PCT = 2.0  # OTM Call average IV must increase by more than 3.0%
 BULLISH_OTM_PUT_FALL_PCT = -1.0  # OTM Put average IV must decrease by more than 1.5%
 
 # Bearish signals
 BEARISH_PUT_RISE_PCT = 3.0       # ATM Put IV must increase by more than 3.0%
-BEARISH_CALL_FALL_PCT = -1.0     # ATM Call IV must decrease by more than 1.5%
-BEARISH_OTM_PUT_RISE_PCT = 3.0   # OTM Put average IV must increase by more than 3.0%
+BEARISH_CALL_FALL_PCT = -1.5     # ATM Call IV must decrease by more than 1.5%
+BEARISH_OTM_PUT_RISE_PCT = 2.0   # OTM Put average IV must increase by more than 3.0%
 BEARISH_OTM_CALL_FALL_PCT = -1.0 # OTM Call average IV must decrease by more than 1.5%
 
 # ========== COOLDOWN SETTINGS ==========
