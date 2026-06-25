@@ -2,13 +2,7 @@ import os
 import json
 import requests
 from datetime import datetime, timedelta
-from config import (
-    BULLISH_CALL_RISE_PCT, BULLISH_PUT_FALL_PCT,
-    BULLISH_OTM_CALL_RISE_PCT, BULLISH_OTM_PUT_FALL_PCT,
-    BEARISH_PUT_RISE_PCT, BEARISH_CALL_FALL_PCT,
-    BEARISH_OTM_PUT_RISE_PCT, BEARISH_OTM_CALL_FALL_PCT,
-    ALERT_COOLDOWN_MINUTES
-)
+from config import ALERT_COOLDOWN_MINUTES, THRESHOLDS
 
 CACHE_FILE = 'iv_state.json'
 MAX_HISTORY = 5
@@ -144,6 +138,9 @@ def check_directional_signal(df, spot_price, symbol, expiry):
         print(f"⚠️ Symbol {symbol} not supported, returning.")
         return
 
+    # Get thresholds for this symbol (fallback to NIFTY if not defined)
+    thresholds = THRESHOLDS.get(symbol, THRESHOLDS["NIFTY"])
+
     atm_strike = get_atm_strike(df, spot_price, symbol)
     print(f"🎯 ATM strike used: {atm_strike}")
 
@@ -242,8 +239,6 @@ def check_directional_signal(df, spot_price, symbol, expiry):
     bearish_timeframes = []
     bullish_details = {}
     bearish_details = {}
-
-    # Dictionary to store Smart Money Scores per timeframe
     smart_scores = {}
 
     print("\n🔍 DEBUG – Percentage changes for SAME strike across time (fallback to nearest if missing):")
@@ -284,15 +279,15 @@ def check_directional_signal(df, spot_price, symbol, expiry):
         print(f"    {label}: ATM CE {pct_delta_atm_ce:+.2f}% | ATM PE {pct_delta_atm_pe:+.2f}% | "
               f"OTM Call {pct_delta_otm_call:+.2f}% | OTM Put {pct_delta_otm_below_put:+.2f}%")
 
-        # --- Compute Smart Money Score for this timeframe ---
+        # Compute Smart Money Score for this timeframe
         call_score, put_score, interp = calculate_smart_money_score(df, atm_strike, prev_snapshot)
         smart_scores[label] = (call_score, put_score, interp)
 
-        # Check bullish condition
-        if (pct_delta_atm_ce > BULLISH_CALL_RISE_PCT and
-            pct_delta_atm_pe < BULLISH_PUT_FALL_PCT and
-            pct_delta_otm_call > BULLISH_OTM_CALL_RISE_PCT and
-            pct_delta_otm_below_put < BULLISH_OTM_PUT_FALL_PCT):
+        # --- Use per-symbol thresholds ---
+        if (pct_delta_atm_ce > thresholds['BULLISH_CALL_RISE_PCT'] and
+            pct_delta_atm_pe < thresholds['BULLISH_PUT_FALL_PCT'] and
+            pct_delta_otm_call > thresholds['BULLISH_OTM_CALL_RISE_PCT'] and
+            pct_delta_otm_below_put < thresholds['BULLISH_OTM_PUT_FALL_PCT']):
             bullish_timeframes.append(label)
             bullish_details[label] = {
                 'atm_ce_iv': (prev_ce_iv, curr_ce_iv, pct_delta_atm_ce),
@@ -301,11 +296,10 @@ def check_directional_signal(df, spot_price, symbol, expiry):
                 'otm_below_put_avg': (prev_snapshot['otm_below_put_avg'], curr_snapshot['otm_below_put_avg'], pct_delta_otm_below_put),
             }
 
-        # Check bearish condition
-        if (pct_delta_atm_pe > BEARISH_PUT_RISE_PCT and
-            pct_delta_atm_ce < BEARISH_CALL_FALL_PCT and
-            pct_delta_otm_below_put > BEARISH_OTM_PUT_RISE_PCT and
-            pct_delta_otm_call < BEARISH_OTM_CALL_FALL_PCT):
+        if (pct_delta_atm_pe > thresholds['BEARISH_PUT_RISE_PCT'] and
+            pct_delta_atm_ce < thresholds['BEARISH_CALL_FALL_PCT'] and
+            pct_delta_otm_below_put > thresholds['BEARISH_OTM_PUT_RISE_PCT'] and
+            pct_delta_otm_call < thresholds['BEARISH_OTM_CALL_FALL_PCT']):
             bearish_timeframes.append(label)
             bearish_details[label] = {
                 'atm_pe_iv': (prev_pe_iv, curr_pe_iv, pct_delta_atm_pe),
@@ -317,11 +311,9 @@ def check_directional_signal(df, spot_price, symbol, expiry):
     print(f"\n📊 Summary: Bullish timeframes = {bullish_timeframes}, Bearish timeframes = {bearish_timeframes}")
 
     if bullish_timeframes or bearish_timeframes:
-        # Determine which timeframe to use for Smart Money Score:
-        # Prefer 5-min if triggered, else 10-min, else 15-min (for bullish or bearish)
+        # Determine which timeframe to use for Smart Money Score (earliest triggered)
         selected_timeframe = None
         if bullish_timeframes:
-            # Pick the earliest (shortest) timeframe that triggered
             for tf in ['5-min', '10-min', '15-min']:
                 if tf in bullish_timeframes:
                     selected_timeframe = tf
@@ -332,11 +324,9 @@ def check_directional_signal(df, spot_price, symbol, expiry):
                     selected_timeframe = tf
                     break
 
-        # Fallback to '5-min' if none selected (should not happen)
         if selected_timeframe is None:
             selected_timeframe = '5-min'
 
-        # Get the Smart Money Score for the selected timeframe
         call_score, put_score, interp = smart_scores.get(selected_timeframe, (0, 0, "⚪ Data unavailable"))
         print(f"🧠 Smart Money Score (based on {selected_timeframe}): Call {call_score}/6, Put {put_score}/6 – {interp}")
 
