@@ -231,15 +231,20 @@ def check_directional_signal(df, spot_price, symbol, expiry):
         print("✅ Initial state saved. Need one more snapshot.")
         return
 
-    # ---- Always print Smart Money Score (if data available) ----
+    # ---- Compute Smart Money Score ONCE and store ----
+    smart_call_score = 0
+    smart_put_score = 0
+    smart_interp = "⚪ Data unavailable"
     if len(history) >= 2:
         prev_snapshot = history[-2]
         if 'ce_iv_by_strike' in prev_snapshot:
-            call_score, put_score, interp = calculate_smart_money_score(df, atm_strike, prev_snapshot)
-            print(f"🧠 Smart Money Score: Call {call_score}/6, Put {put_score}/6 – {interp}")
+            smart_call_score, smart_put_score, smart_interp = calculate_smart_money_score(df, atm_strike, prev_snapshot)
         else:
-            print("🧠 Smart Money Score: Data unavailable (cache rebuilding)")
-    # ---------------------------------------------------------
+            smart_interp = "⚪ Smart Money data unavailable (cache rebuilding)"
+    # -------------------------------------------------
+
+    # Print the score once (for debug)
+    print(f"🧠 Smart Money Score: Call {smart_call_score}/6, Put {smart_put_score}/6 – {smart_interp}")
 
     if last_alert_time:
         last_alert_dt = datetime.fromisoformat(last_alert_time)
@@ -318,9 +323,7 @@ def check_directional_signal(df, spot_price, symbol, expiry):
     print(f"\n📊 Summary: Bullish timeframes = {bullish_timeframes}, Bearish timeframes = {bearish_timeframes}")
 
     if bullish_timeframes or bearish_timeframes:
-        prev_snapshot = history[-2]
-        call_score, put_score, interp = calculate_smart_money_score(df, atm_strike, prev_snapshot)
-
+        # Use the pre-computed smart money scores
         if bullish_timeframes and not bearish_timeframes:
             msg = f"🟢 *BULLISH Signal* ({symbol} Spot: {spot_price:.2f})\n\n"
             msg += f"✅ Triggered at: {', '.join(bullish_timeframes)}\n"
@@ -362,9 +365,9 @@ def check_directional_signal(df, spot_price, symbol, expiry):
                 msg += f"  🔴 {label} - ATM Put Δ{d['atm_pe_iv'][2]:+.1f}% | ATM Call Δ{d['atm_ce_iv'][2]:+.1f}%\n"
 
         msg += f"\n🧠 *Smart Money Context:*\n"
-        msg += f"   Call Score: {call_score}/6  {'🟢' if call_score >= 4 else '⚪'}\n"
-        msg += f"   Put Score:  {put_score}/6  {'🔴' if put_score >= 4 else '⚪'}\n"
-        msg += f"   → {interp}"
+        msg += f"   Call Score: {smart_call_score}/6  {'🟢' if smart_call_score >= 4 else '⚪'}\n"
+        msg += f"   Put Score:  {smart_put_score}/6  {'🔴' if smart_put_score >= 4 else '⚪'}\n"
+        msg += f"   → {smart_interp}"
 
         send_telegram(msg)
         state['last_alert_time'] = datetime.now().isoformat()
