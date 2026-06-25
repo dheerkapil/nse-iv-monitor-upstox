@@ -223,6 +223,15 @@ def check_directional_signal(df, spot_price, symbol, expiry):
         print("✅ Initial state saved. Need one more snapshot for comparison.")
         return
 
+    # --- DEBUG: Compute Smart Money Score from previous snapshot (if available) ---
+    if len(history) >= 2:
+        prev_snapshot = history[-2]
+        if 'ce_iv_by_strike' in prev_snapshot:
+            call_score, put_score, interp = calculate_smart_money_score(df, atm_strike, prev_snapshot)
+            print(f"🧠 Smart Money Score (prev snapshot): Call {call_score}/6, Put {put_score}/6 – {interp}")
+        else:
+            print("🧠 Smart Money Score: Data unavailable (cache rebuilding)")
+
     if last_alert_time:
         last_alert_dt = datetime.fromisoformat(last_alert_time)
         if (datetime.now() - last_alert_dt) < timedelta(minutes=ALERT_COOLDOWN_MINUTES):
