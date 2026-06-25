@@ -6,12 +6,12 @@ from config import (
     BULLISH_CALL_RISE_PCT, BULLISH_PUT_FALL_PCT,
     BULLISH_OTM_CALL_RISE_PCT, BULLISH_OTM_PUT_FALL_PCT,
     BEARISH_PUT_RISE_PCT, BEARISH_CALL_FALL_PCT,
-    BEARISH_OTM_PUT_RISE_PCT, BEARISH_OTM_CALL_FALL_PCT
+    BEARISH_OTM_PUT_RISE_PCT, BEARISH_OTM_CALL_FALL_PCT,
+    ALERT_COOLDOWN_MINUTES  # <-- imported from config
 )
 
 CACHE_FILE = 'iv_state.json'
 MAX_HISTORY = 5
-ALERT_COOLDOWN_MINUTES = 2   # Will move to config later
 
 def send_telegram(message):
     bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -50,13 +50,7 @@ def save_state(symbol, state):
         json.dump(data, f, indent=2)
 
 def get_atm_strike(df, spot_price, symbol):
-    """
-    Find ATM strike.
-    For NIFTY, round spot to nearest 100 to avoid 50-point strikes.
-    For BANKNIFTY, use closest strike to actual spot.
-    """
     if symbol == "NIFTY":
-        # Round spot to nearest 100
         rounded_spot = round(spot_price / 100) * 100
         df['strike_diff'] = abs(df['strike'] - rounded_spot)
     else:
@@ -138,7 +132,6 @@ def check_directional_signal(df, spot_price, symbol, expiry):
         print(f"⚠️ Symbol {symbol} not supported, returning.")
         return
 
-    # Use the updated get_atm_strike with symbol
     atm_strike = get_atm_strike(df, spot_price, symbol)
     print(f"🎯 ATM strike used: {atm_strike}")
 
@@ -174,7 +167,6 @@ def check_directional_signal(df, spot_price, symbol, expiry):
     atm_ce_iv = df.loc[df['strike'] == atm_strike, 'ce_iv'].values[0]
     atm_pe_iv = df.loc[df['strike'] == atm_strike, 'pe_iv'].values[0]
 
-    # OTM averages for message
     above_strikes, below_strikes = get_otm_strikes(df, atm_strike, step=100, count=2)
     otm_ce_ivs = [df.loc[df['strike'] == s, 'ce_iv'].values[0] for s in above_strikes]
     otm_pe_ivs = [df.loc[df['strike'] == s, 'pe_iv'].values[0] for s in above_strikes]
@@ -218,7 +210,6 @@ def check_directional_signal(df, spot_price, symbol, expiry):
     if history:
         print(f"   Last expiry in history: {history[-1].get('expiry')}, current expiry: {expiry}")
 
-    # If history exists but expiry changed → clear it
     if history and history[-1].get('expiry') != expiry:
         print(f"📅 Expiry changed from {history[-1].get('expiry')} to {expiry}. Clearing history.")
         history = []
@@ -232,7 +223,6 @@ def check_directional_signal(df, spot_price, symbol, expiry):
         print("✅ Initial state saved. Need one more snapshot for comparison.")
         return
 
-    # Cooldown
     if last_alert_time:
         last_alert_dt = datetime.fromisoformat(last_alert_time)
         if (datetime.now() - last_alert_dt) < timedelta(minutes=ALERT_COOLDOWN_MINUTES):
@@ -256,12 +246,10 @@ def check_directional_signal(df, spot_price, symbol, expiry):
         prev_snapshot = history[idx]
         curr_snapshot = history[-1]
 
-        # Ensure both snapshots have per-strike data
         if ('ce_iv_by_strike' not in prev_snapshot or 'ce_iv_by_strike' not in curr_snapshot):
-            print(f"    Snapshot format mismatch (missing per-strike data) – skipping. Cache will rebuild.")
+            print(f"    Snapshot format mismatch – skipping.")
             continue
 
-        # Find closest strike in both snapshots (returns the actual key)
         prev_strike = get_closest_strike(prev_snapshot['ce_iv_by_strike'], atm_strike, 100)
         curr_strike = get_closest_strike(curr_snapshot['ce_iv_by_strike'], atm_strike, 100)
 
@@ -269,18 +257,15 @@ def check_directional_signal(df, spot_price, symbol, expiry):
             print(f"    No strike within 100 points of {atm_strike} in history/current – skipping")
             continue
 
-        # Now retrieve IVs using the exact keys returned
         curr_ce_iv = curr_snapshot['ce_iv_by_strike'].get(curr_strike)
         prev_ce_iv = prev_snapshot['ce_iv_by_strike'].get(prev_strike)
         curr_pe_iv = curr_snapshot['pe_iv_by_strike'].get(curr_strike)
         prev_pe_iv = prev_snapshot['pe_iv_by_strike'].get(prev_strike)
 
-        # If any IV is None, skip
         if curr_ce_iv is None or prev_ce_iv is None or curr_pe_iv is None or prev_pe_iv is None:
             print(f"    IV data missing for found strikes – skipping")
             continue
 
-        # For OTM averages, we use the snapshot's stored averages
         curr_otm_call_avg = curr_snapshot['otm_call_avg']
         prev_otm_call_avg = prev_snapshot['otm_call_avg']
         curr_otm_below_put_avg = curr_snapshot['otm_below_put_avg']
