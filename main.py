@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from src.option_chain import fetch_option_chain, get_expiry_date
 from src.utils import save_to_csv
-from src.alerts import check_directional_signal
+from src.alerts import check_directional_signal, get_atm_strike, get_otm_strikes
 from config import TRACK_INDICES, INSTRUMENTS
 
 def clean_spot_price(spot):
@@ -38,7 +38,15 @@ def main():
             spot_num = clean_spot_price(spot)
             if spot_num is not None:
                 print(f"✅ Cleaned spot price: {spot_num}")
-                check_directional_signal(df, spot_num, symbol, expiry)  # <-- pass expiry
+
+                # --- Debug: Show ATM and OTM strikes used ---
+                atm_strike = get_atm_strike(df, spot_num, symbol)  # pass symbol
+                otm_above, otm_below = get_otm_strikes(df, atm_strike, step=100, count=2)
+                print(f"🎯 ATM strike: {atm_strike}")
+                print(f"📈 OTM above: {otm_above} (averaged for OTM Call IV)")
+                print(f"📉 OTM below: {otm_below} (averaged for OTM Put IV)")
+
+                check_directional_signal(df, spot_num, symbol, expiry)
             else:
                 print(f"⚠️ Could not parse spot price: '{spot}'")
 
