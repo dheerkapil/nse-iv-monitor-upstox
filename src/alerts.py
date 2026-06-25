@@ -231,21 +231,6 @@ def check_directional_signal(df, spot_price, symbol, expiry):
         print("✅ Initial state saved. Need one more snapshot.")
         return
 
-    # ---- Compute Smart Money Score ONCE and store ----
-    smart_call_score = 0
-    smart_put_score = 0
-    smart_interp = "⚪ Data unavailable"
-    if len(history) >= 2:
-        prev_snapshot = history[-2]
-        if 'ce_iv_by_strike' in prev_snapshot:
-            smart_call_score, smart_put_score, smart_interp = calculate_smart_money_score(df, atm_strike, prev_snapshot)
-        else:
-            smart_interp = "⚪ Smart Money data unavailable (cache rebuilding)"
-    # -------------------------------------------------
-
-    # Print the score once (for debug)
-    print(f"🧠 Smart Money Score: Call {smart_call_score}/6, Put {smart_put_score}/6 – {smart_interp}")
-
     if last_alert_time:
         last_alert_dt = datetime.fromisoformat(last_alert_time)
         if (datetime.now() - last_alert_dt) < timedelta(minutes=ALERT_COOLDOWN_MINUTES):
@@ -257,6 +242,9 @@ def check_directional_signal(df, spot_price, symbol, expiry):
     bearish_timeframes = []
     bullish_details = {}
     bearish_details = {}
+
+    # Dictionary to store Smart Money Scores per timeframe
+    smart_scores = {}
 
     print("\n🔍 DEBUG – Percentage changes for SAME strike across time (fallback to nearest if missing):")
     for label, idx in timeframes.items():
@@ -296,6 +284,11 @@ def check_directional_signal(df, spot_price, symbol, expiry):
         print(f"    {label}: ATM CE {pct_delta_atm_ce:+.2f}% | ATM PE {pct_delta_atm_pe:+.2f}% | "
               f"OTM Call {pct_delta_otm_call:+.2f}% | OTM Put {pct_delta_otm_below_put:+.2f}%")
 
+        # --- Compute Smart Money Score for this timeframe ---
+        call_score, put_score, interp = calculate_smart_money_score(df, atm_strike, prev_snapshot)
+        smart_scores[label] = (call_score, put_score, interp)
+
+        # Check bullish condition
         if (pct_delta_atm_ce > BULLISH_CALL_RISE_PCT and
             pct_delta_atm_pe < BULLISH_PUT_FALL_PCT and
             pct_delta_otm_call > BULLISH_OTM_CALL_RISE_PCT and
@@ -308,6 +301,7 @@ def check_directional_signal(df, spot_price, symbol, expiry):
                 'otm_below_put_avg': (prev_snapshot['otm_below_put_avg'], curr_snapshot['otm_below_put_avg'], pct_delta_otm_below_put),
             }
 
+        # Check bearish condition
         if (pct_delta_atm_pe > BEARISH_PUT_RISE_PCT and
             pct_delta_atm_ce < BEARISH_CALL_FALL_PCT and
             pct_delta_otm_below_put > BEARISH_OTM_PUT_RISE_PCT and
@@ -323,7 +317,29 @@ def check_directional_signal(df, spot_price, symbol, expiry):
     print(f"\n📊 Summary: Bullish timeframes = {bullish_timeframes}, Bearish timeframes = {bearish_timeframes}")
 
     if bullish_timeframes or bearish_timeframes:
-        # Use the pre-computed smart money scores
+        # Determine which timeframe to use for Smart Money Score:
+        # Prefer 5-min if triggered, else 10-min, else 15-min (for bullish or bearish)
+        selected_timeframe = None
+        if bullish_timeframes:
+            # Pick the earliest (shortest) timeframe that triggered
+            for tf in ['5-min', '10-min', '15-min']:
+                if tf in bullish_timeframes:
+                    selected_timeframe = tf
+                    break
+        elif bearish_timeframes:
+            for tf in ['5-min', '10-min', '15-min']:
+                if tf in bearish_timeframes:
+                    selected_timeframe = tf
+                    break
+
+        # Fallback to '5-min' if none selected (should not happen)
+        if selected_timeframe is None:
+            selected_timeframe = '5-min'
+
+        # Get the Smart Money Score for the selected timeframe
+        call_score, put_score, interp = smart_scores.get(selected_timeframe, (0, 0, "⚪ Data unavailable"))
+        print(f"🧠 Smart Money Score (based on {selected_timeframe}): Call {call_score}/6, Put {put_score}/6 – {interp}")
+
         if bullish_timeframes and not bearish_timeframes:
             msg = f"🟢 *BULLISH Signal* ({symbol} Spot: {spot_price:.2f})\n\n"
             msg += f"✅ Triggered at: {', '.join(bullish_timeframes)}\n"
@@ -364,10 +380,10 @@ def check_directional_signal(df, spot_price, symbol, expiry):
                 d = bearish_details[label]
                 msg += f"  🔴 {label} - ATM Put Δ{d['atm_pe_iv'][2]:+.1f}% | ATM Call Δ{d['atm_ce_iv'][2]:+.1f}%\n"
 
-        msg += f"\n🧠 *Smart Money Context:*\n"
-        msg += f"   Call Score: {smart_call_score}/6  {'🟢' if smart_call_score >= 4 else '⚪'}\n"
-        msg += f"   Put Score:  {smart_put_score}/6  {'🔴' if smart_put_score >= 4 else '⚪'}\n"
-        msg += f"   → {smart_interp}"
+        msg += f"\n🧠 *Smart Money Context (based on {selected_timeframe}):*\n"
+        msg += f"   Call Score: {call_score}/6  {'🟢' if call_score >= 4 else '⚪'}\n"
+        msg += f"   Put Score:  {put_score}/6  {'🔴' if put_score >= 4 else '⚪'}\n"
+        msg += f"   → {interp}"
 
         send_telegram(msg)
         state['last_alert_time'] = datetime.now().isoformat()
