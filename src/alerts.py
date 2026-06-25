@@ -310,66 +310,68 @@ def check_directional_signal(df, spot_price, symbol, expiry):
             }
 
     print(f"\n📊 Summary: Bullish timeframes = {bullish_timeframes}, Bearish timeframes = {bearish_timeframes}")
-
-    # --- DEBUG: Check if entering alert sending block ---
     print("🔔 DEBUG: Entering alert sending block check...")
-    if bullish_timeframes or bearish_timeframes:
-        print("✅ Alert conditions met – preparing message...")
-        prev_snapshot = history[-2]
-        if 'ce_iv_by_strike' in prev_snapshot:
-            call_score, put_score, interp = calculate_smart_money_score(df, atm_strike, prev_snapshot)
+
+    try:
+        if bullish_timeframes or bearish_timeframes:
+            print("✅ Alert conditions met – preparing message...")
+            prev_snapshot = history[-2]
+            if 'ce_iv_by_strike' in prev_snapshot:
+                call_score, put_score, interp = calculate_smart_money_score(df, atm_strike, prev_snapshot)
+            else:
+                call_score, put_score, interp = 0, 0, "⚪ Smart Money data unavailable (cache rebuilding)"
+
+            if bullish_timeframes and not bearish_timeframes:
+                msg = f"🟢 *BULLISH Signal* ({symbol} Spot: {spot_price:.2f})\n\n"
+                msg += f"✅ Triggered at: {', '.join(bullish_timeframes)}\n"
+                non_bullish = [t for t in timeframes.keys() if t not in bullish_timeframes]
+                if non_bullish:
+                    msg += f"⏳ Not confirmed at: {', '.join(non_bullish)}\n\n"
+                msg += "*% Changes (same strike, fallback to nearest if needed):*\n"
+                for label in bullish_timeframes:
+                    d = bullish_details[label]
+                    msg += f"  *{label}*: ATM Call {d['atm_ce_iv'][0]:.2f}→{d['atm_ce_iv'][1]:.2f} ({d['atm_ce_iv'][2]:+.1f}%) | "
+                    msg += f"ATM Put {d['atm_pe_iv'][0]:.2f}→{d['atm_pe_iv'][1]:.2f} ({d['atm_pe_iv'][2]:+.1f}%)\n"
+                    msg += f"    OTM Call {d['otm_call_avg'][0]:.2f}→{d['otm_call_avg'][1]:.2f} ({d['otm_call_avg'][2]:+.1f}%) | "
+                    msg += f"OTM Put {d['otm_below_put_avg'][0]:.2f}→{d['otm_below_put_avg'][1]:.2f} ({d['otm_below_put_avg'][2]:+.1f}%)\n"
+            elif bearish_timeframes and not bullish_timeframes:
+                msg = f"🔴 *BEARISH Signal* ({symbol} Spot: {spot_price:.2f})\n\n"
+                msg += f"✅ Triggered at: {', '.join(bearish_timeframes)}\n"
+                non_bearish = [t for t in timeframes.keys() if t not in bearish_timeframes]
+                if non_bearish:
+                    msg += f"⏳ Not confirmed at: {', '.join(non_bearish)}\n\n"
+                msg += "*% Changes (same strike, fallback to nearest if needed):*\n"
+                for label in bearish_timeframes:
+                    d = bearish_details[label]
+                    msg += f"  *{label}*: ATM Put {d['atm_pe_iv'][0]:.2f}→{d['atm_pe_iv'][1]:.2f} ({d['atm_pe_iv'][2]:+.1f}%) | "
+                    msg += f"ATM Call {d['atm_ce_iv'][0]:.2f}→{d['atm_ce_iv'][1]:.2f} ({d['atm_ce_iv'][2]:+.1f}%)\n"
+                    msg += f"    OTM Put {d['otm_below_put_avg'][0]:.2f}→{d['otm_below_put_avg'][1]:.2f} ({d['otm_below_put_avg'][2]:+.1f}%) | "
+                    msg += f"OTM Call {d['otm_call_avg'][0]:.2f}→{d['otm_call_avg'][1]:.2f} ({d['otm_call_avg'][2]:+.1f}%)\n"
+            else:
+                msg = f"⚠️ *MIXED TIMEFRAME SIGNAL* ({symbol} Spot: {spot_price:.2f})\n\n"
+                msg += f"🟢 Bullish at: {', '.join(bullish_timeframes)}\n"
+                msg += f"🔴 Bearish at: {', '.join(bearish_timeframes)}\n\n"
+                msg += "*Changes (same strike, fallback to nearest if needed):*\n"
+                for label in bullish_timeframes:
+                    d = bullish_details[label]
+                    msg += f"  🟢 {label} - ATM Call Δ{d['atm_ce_iv'][2]:+.1f}% | ATM Put Δ{d['atm_pe_iv'][2]:+.1f}%\n"
+                for label in bearish_timeframes:
+                    d = bearish_details[label]
+                    msg += f"  🔴 {label} - ATM Put Δ{d['atm_pe_iv'][2]:+.1f}% | ATM Call Δ{d['atm_ce_iv'][2]:+.1f}%\n"
+
+            msg += f"\n🧠 *Smart Money Context:*\n"
+            msg += f"   Call Score: {call_score}/6  {'🟢' if call_score >= 4 else '⚪'}\n"
+            msg += f"   Put Score:  {put_score}/6  {'🔴' if put_score >= 4 else '⚪'}\n"
+            msg += f"   → {interp}"
+
+            print("📤 Sending Telegram message...")
+            send_telegram(msg)
+            state['last_alert_time'] = datetime.now().isoformat()
+            save_state(symbol, state)
+            print("✅ Alert sent and state updated.")
         else:
-            call_score, put_score, interp = 0, 0, "⚪ Smart Money data unavailable (cache rebuilding)"
-
-        if bullish_timeframes and not bearish_timeframes:
-            msg = f"🟢 *BULLISH Signal* ({symbol} Spot: {spot_price:.2f})\n\n"
-            msg += f"✅ Triggered at: {', '.join(bullish_timeframes)}\n"
-            non_bullish = [t for t in timeframes.keys() if t not in bullish_timeframes]
-            if non_bullish:
-                msg += f"⏳ Not confirmed at: {', '.join(non_bullish)}\n\n"
-            msg += "*% Changes (same strike, fallback to nearest if needed):*\n"
-            for label in bullish_timeframes:
-                d = bullish_details[label]
-                msg += f"  *{label}*: ATM Call {d['atm_ce_iv'][0]:.2f}→{d['atm_ce_iv'][1]:.2f} ({d['atm_ce_iv'][2]:+.1f}%) | "
-                msg += f"ATM Put {d['atm_pe_iv'][0]:.2f}→{d['atm_pe_iv'][1]:.2f} ({d['atm_pe_iv'][2]:+.1f}%)\n"
-                msg += f"    OTM Call {d['otm_call_avg'][0]:.2f}→{d['otm_call_avg'][1]:.2f} ({d['otm_call_avg'][2]:+.1f}%) | "
-                msg += f"OTM Put {d['otm_below_put_avg'][0]:.2f}→{d['otm_below_put_avg'][1]:.2f} ({d['otm_below_put_avg'][2]:+.1f}%)\n"
-
-        elif bearish_timeframes and not bullish_timeframes:
-            msg = f"🔴 *BEARISH Signal* ({symbol} Spot: {spot_price:.2f})\n\n"
-            msg += f"✅ Triggered at: {', '.join(bearish_timeframes)}\n"
-            non_bearish = [t for t in timeframes.keys() if t not in bearish_timeframes]
-            if non_bearish:
-                msg += f"⏳ Not confirmed at: {', '.join(non_bearish)}\n\n"
-            msg += "*% Changes (same strike, fallback to nearest if needed):*\n"
-            for label in bearish_timeframes:
-                d = bearish_details[label]
-                msg += f"  *{label}*: ATM Put {d['atm_pe_iv'][0]:.2f}→{d['atm_pe_iv'][1]:.2f} ({d['atm_pe_iv'][2]:+.1f}%) | "
-                msg += f"ATM Call {d['atm_ce_iv'][0]:.2f}→{d['atm_ce_iv'][1]:.2f} ({d['atm_ce_iv'][2]:+.1f}%)\n"
-                msg += f"    OTM Put {d['otm_below_put_avg'][0]:.2f}→{d['otm_below_put_avg'][1]:.2f} ({d['otm_below_put_avg'][2]:+.1f}%) | "
-                msg += f"OTM Call {d['otm_call_avg'][0]:.2f}→{d['otm_call_avg'][1]:.2f} ({d['otm_call_avg'][2]:+.1f}%)\n"
-
-        else:
-            msg = f"⚠️ *MIXED TIMEFRAME SIGNAL* ({symbol} Spot: {spot_price:.2f})\n\n"
-            msg += f"🟢 Bullish at: {', '.join(bullish_timeframes)}\n"
-            msg += f"🔴 Bearish at: {', '.join(bearish_timeframes)}\n\n"
-            msg += "*Changes (same strike, fallback to nearest if needed):*\n"
-            for label in bullish_timeframes:
-                d = bullish_details[label]
-                msg += f"  🟢 {label} - ATM Call Δ{d['atm_ce_iv'][2]:+.1f}% | ATM Put Δ{d['atm_pe_iv'][2]:+.1f}%\n"
-            for label in bearish_timeframes:
-                d = bearish_details[label]
-                msg += f"  🔴 {label} - ATM Put Δ{d['atm_pe_iv'][2]:+.1f}% | ATM Call Δ{d['atm_ce_iv'][2]:+.1f}%\n"
-
-        msg += f"\n🧠 *Smart Money Context:*\n"
-        msg += f"   Call Score: {call_score}/6  {'🟢' if call_score >= 4 else '⚪'}\n"
-        msg += f"   Put Score:  {put_score}/6  {'🔴' if put_score >= 4 else '⚪'}\n"
-        msg += f"   → {interp}"
-
-        print("📤 Sending Telegram message...")
-        send_telegram(msg)
-        state['last_alert_time'] = datetime.now().isoformat()
-        save_state(symbol, state)
-        print("✅ Alert sent and state updated.")
-    else:
-        print("✅ No directional signal triggered at any timeframe.")
+            print("✅ No directional signal triggered at any timeframe.")
+    except Exception as e:
+        print(f"❌ ERROR in alert sending block: {e}")
+        import traceback
+        traceback.print_exc()
