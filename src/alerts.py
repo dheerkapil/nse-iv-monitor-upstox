@@ -138,7 +138,7 @@ def calculate_smart_money_score(df, atm_strike, prev_data):
     return call_score, put_score, interp
 
 def check_directional_signal(df, spot_price, symbol, expiry):
-    print("🔍 ENTERED check_directional_signal...")   # <-- This must appear in logs
+    print("🔍 ENTERED check_directional_signal...")
 
     if symbol not in ["NIFTY", "BANKNIFTY"]:
         print(f"⚠️ Symbol {symbol} not supported, returning.")
@@ -230,6 +230,16 @@ def check_directional_signal(df, spot_price, symbol, expiry):
     if len(history) < 2:
         print("✅ Initial state saved. Need one more snapshot.")
         return
+
+    # ---- Always print Smart Money Score (if data available) ----
+    if len(history) >= 2:
+        prev_snapshot = history[-2]
+        if 'ce_iv_by_strike' in prev_snapshot:
+            call_score, put_score, interp = calculate_smart_money_score(df, atm_strike, prev_snapshot)
+            print(f"🧠 Smart Money Score: Call {call_score}/6, Put {put_score}/6 – {interp}")
+        else:
+            print("🧠 Smart Money Score: Data unavailable (cache rebuilding)")
+    # ---------------------------------------------------------
 
     if last_alert_time:
         last_alert_dt = datetime.fromisoformat(last_alert_time)
