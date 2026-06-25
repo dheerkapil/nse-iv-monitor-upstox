@@ -39,15 +39,17 @@ def main():
             if spot_num is not None:
                 print(f"✅ Cleaned spot price: {spot_num}")
 
-                # --- Debug: Show ATM and OTM strikes used ---
                 atm_strike = get_atm_strike(df, spot_num, symbol)
                 otm_above, otm_below = get_otm_strikes(df, atm_strike, step=100, count=2)
                 print(f"🎯 ATM strike: {atm_strike}")
                 print(f"📈 OTM above: {otm_above} (averaged for OTM Call IV)")
                 print(f"📉 OTM below: {otm_below} (averaged for OTM Put IV)")
 
-                # Call the alert function
+                # ----- Call the alert function -----
+                print("🔍 Calling check_directional_signal...")
                 check_directional_signal(df, spot_num, symbol, expiry)
+                # ------------------------------------
+
             else:
                 print(f"⚠️ Could not parse spot price: '{spot}'")
 
