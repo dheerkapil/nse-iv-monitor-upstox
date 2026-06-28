@@ -22,23 +22,23 @@ TRACK_INDICES = ["NIFTY", "BANKNIFTY"]
 # BANKNIFTY thresholds are set higher to filter out noise due to higher volatility.
 THRESHOLDS = {
     "NIFTY": {
-        "BULLISH_CALL_RISE_PCT": 3.0,
-        "BULLISH_PUT_FALL_PCT": -1.5,
-        "BULLISH_OTM_CALL_RISE_PCT": 2.0,
-        "BULLISH_OTM_PUT_FALL_PCT": -1.0,
-        "BEARISH_PUT_RISE_PCT": 3.0,
-        "BEARISH_CALL_FALL_PCT": -1.5,
-        "BEARISH_OTM_PUT_RISE_PCT": 2.0,
-        "BEARISH_OTM_CALL_FALL_PCT": -1.0,
+        "BULLISH_CALL_RISE_PCT": 5.0,
+        "BULLISH_PUT_FALL_PCT": -3.0,
+        "BULLISH_OTM_CALL_RISE_PCT": 3.0,
+        "BULLISH_OTM_PUT_FALL_PCT": -2.0,
+        "BEARISH_PUT_RISE_PCT": 5.0,
+        "BEARISH_CALL_FALL_PCT": -3.0,
+        "BEARISH_OTM_PUT_RISE_PCT": 3.0,
+        "BEARISH_OTM_CALL_FALL_PCT": -2.0,
     },
     "BANKNIFTY": {
         # Higher thresholds to reduce false signals in a more volatile index
-        "BULLISH_CALL_RISE_PCT": 4.0,
-        "BULLISH_PUT_FALL_PCT": -2.0,
+        "BULLISH_CALL_RISE_PCT": 5.0,
+        "BULLISH_PUT_FALL_PCT": -3.0,
         "BULLISH_OTM_CALL_RISE_PCT": 4.0,
         "BULLISH_OTM_PUT_FALL_PCT": -2.0,
-        "BEARISH_PUT_RISE_PCT": 4.0,
-        "BEARISH_CALL_FALL_PCT": -2.0,
+        "BEARISH_PUT_RISE_PCT": 5.0,
+        "BEARISH_CALL_FALL_PCT": -3.0,
         "BEARISH_OTM_PUT_RISE_PCT": 4.0,
         "BEARISH_OTM_CALL_FALL_PCT": -2.0,
     }
